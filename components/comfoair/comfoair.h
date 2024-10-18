@@ -634,6 +634,7 @@ uint8_t comfoair_checksum_(const uint8_t *command_data, uint8_t length) const {
         break;
       }
       case RES_GET_OPERATION_HOURS: {
+	ESP_LOGD(TAG, "Received RES_GET_OPERATION_HOURS");
         if (level0_hours != nullptr) {
           level0_hours->publish_state((msg[0] << 16) | (msg[1] << 8) | msg[2]);
         }
