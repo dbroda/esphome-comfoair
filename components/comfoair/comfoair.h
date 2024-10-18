@@ -237,7 +237,7 @@ protected:
       write_array(command_data, command_data_length);
       write_byte((command + command_data_length + comfoair_checksum_(command_data, command_data_length)) & 0xff);
     } else {
-      ESP_LOGD(TAG, "Sending simple command: %i", command);
+      ESP_LOGD(TAG, "Sending simple command: 0x%02X", command);
       write_byte(comfoair_checksum_(&command, 0));
       //write_byte(comfoair_checksum_(&command, 1));
     }
