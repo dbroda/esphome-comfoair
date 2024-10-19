@@ -246,33 +246,33 @@ protected:
     flush();
 }
 
-uint8_t comfoair_checksum_(const uint8_t *command_data, uint8_t length) const {
-  uint8_t checksum = 0xAD; // Initialize checksum to 173
-  bool seven_encountered = false;
+// uint8_t comfoair_checksum_(const uint8_t *command_data, uint8_t length) const {
+//   uint8_t checksum = 0xAD; // Initialize checksum to 173
+//   bool seven_encountered = false;
 
-  for (uint8_t i = 0; i < length; i++) {
-    if (command_data[i] == 0x07) {
-      if (!seven_encountered) {
-        seven_encountered = true; // Mark that we've encountered the first 0x07
-      } else {
-        seven_encountered = false; // Reset the flag
-        continue; // Skip adding this 0x07 byte to the checksum
-      }
+//   for (uint8_t i = 0; i < length; i++) {
+//     if (command_data[i] == 0x07) {
+//       if (!seven_encountered) {
+//         seven_encountered = true; // Mark that we've encountered the first 0x07
+//       } else {
+//         seven_encountered = false; // Reset the flag
+//         continue; // Skip adding this 0x07 byte to the checksum
+//       }
+//     }
+//     checksum += command_data[i];
+//   }
+
+//   return checksum;
+// }
+
+
+ uint8_t comfoair_checksum_(const uint8_t *command_data, uint8_t length) const {
+   uint8_t sum = 0;
+   for (uint8_t i = 0; i < length; i++) {
+      sum += command_data[i];
     }
-    checksum += command_data[i];
+    return sum + 0xad;
   }
-
-  return checksum;
-}
-
-
-//  uint8_t comfoair_checksum_(const uint8_t *command_data, uint8_t length) const {
-//    uint8_t sum = 0;
-//    for (uint8_t i = 0; i < length; i++) {
-  //     sum += command_data[i];
-  //   }
-  //   return sum + 0xad;
-  // }
 
   optional<bool> check_byte_() const {
     uint8_t index = data_index_;
@@ -314,8 +314,8 @@ uint8_t comfoair_checksum_(const uint8_t *command_data, uint8_t length) const {
       uint8_t checksum = comfoair_checksum_(data_ + 2, COMMAND_LEN_HEAD + data_length - 2);
       if (checksum != byte) {
         //ESP_LOGW(TAG, "%02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X", data_[0], data_[1], data_[2], data_[3], data_[4], data_[5], data_[6], data_[7], data_[8], data_[9], data_[10]);
-        ESP_LOGW(TAG, "ALLOWING! ComfoAir Checksum doesn't match: 0x%02X!=0x%02X", byte, checksum);
-        return true;
+        ESP_LOGW(TAG, "ComfoAir Checksum doesn't match: 0x%02X!=0x%02X", byte, checksum);
+        return false;
       }
       return true;
     }
