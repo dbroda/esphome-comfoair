@@ -229,9 +229,9 @@ protected:
 
   void write_command_(const uint8_t command, const uint8_t *command_data, uint8_t command_data_length) {
     write_byte(COMMAND_PREFIX);
-    write_byte(COMMAND_HEAD);    
-    write_byte(command);
+    write_byte(COMMAND_HEAD); 
     write_byte(0x00);
+    write_byte(command);
     write_byte(command_data_length);
     if (command_data_length > 0) {
       write_array(command_data, command_data_length);
