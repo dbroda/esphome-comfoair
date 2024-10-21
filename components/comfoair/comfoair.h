@@ -246,6 +246,30 @@ protected:
     flush();
 }
 
+// Corrected checksum function
+  uint8_t comfoair_checksum_(const uint8_t *command_data, uint8_t length) const {
+    uint8_t checksum = 0xAD; // Initialize checksum to 173
+    bool seven_encountered = false;
+
+    for (uint8_t i = 0; i < length; i++) {
+      if (command_data[i] == 0x07) {
+        if (!seven_encountered) {
+          seven_encountered = true; // First 0x07 encountered
+          ESP_LOGD(TAG, "Adding byte 0x07 to checksum");
+        } else {
+          seven_encountered = false; // Second 0x07 encountered
+          ESP_LOGD(TAG, "Skipping second 0x07 byte");
+          continue; // Skip adding this 0x07 byte to the checksum
+        }
+      }
+      checksum += command_data[i];
+      ESP_LOGD(TAG, "Added byte 0x%02X, checksum now 0x%02X", command_data[i], checksum);
+    }
+
+    ESP_LOGD(TAG, "Final checksum: 0x%02X", checksum);
+    return checksum;
+  }
+
 // uint8_t comfoair_checksum_(const uint8_t *command_data, uint8_t length) const {
 //   uint8_t checksum = 0xAD; // Initialize checksum to 173
 //   bool seven_encountered = false;
@@ -266,13 +290,13 @@ protected:
 // }
 
 
- uint8_t comfoair_checksum_(const uint8_t *command_data, uint8_t length) const {
-   uint8_t sum = 0;
-   for (uint8_t i = 0; i < length; i++) {
-      sum += command_data[i];
-    }
-    return sum + 0xad;
-  }
+ // uint8_t comfoair_checksum_(const uint8_t *command_data, uint8_t length) const {
+ //   uint8_t sum = 0;
+ //   for (uint8_t i = 0; i < length; i++) {
+ //      sum += command_data[i];
+ //    }
+ //    return sum + 0xad;
+ //  }
 
   optional<bool> check_byte_() const {
     uint8_t index = data_index_;
