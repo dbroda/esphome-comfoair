@@ -338,7 +338,7 @@ uint8_t comfoair_checksum_(const uint8_t *data, size_t length) const {
       // checksum is without checksum bytes
       uint8_t checksum = comfoair_checksum_(data_ + 2, COMMAND_LEN_HEAD + data_length - 2);
       if (checksum != byte) {
-        ESP_LOGW(TAG, "%02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X", data_[10], data_[11], data_[12], data_[13], data_[14], data_[15], data_[16], data_[17], data_[18], data_[19], data_[20], data_[21]);
+        ESP_LOGW(TAG, "%02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X",data_[0], data_[1], data_[2], data_[3], data_[4], data_[5], data_[6], data_[7], data_[8], data_[9], data_[10], data_[11], data_[12], data_[13], data_[14], data_[15], data_[16], data_[17], data_[18], data_[19], data_[20]);
         ESP_LOGW(TAG, "ComfoAir Checksum doesn't match: 0x%02X!=0x%02X", byte, checksum);
         return false;
       }
