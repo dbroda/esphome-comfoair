@@ -253,6 +253,7 @@ uint8_t comfoair_checksum_(const uint8_t *data, size_t length) const {
     for (size_t i = 0; i < length; ++i) {
         if (skip_next) {
             // Current byte is a duplicated 0x07, skip it
+	    ESP_LOGD(TAG, "Skipping next byte");
             skip_next = false;
             continue;
         }
@@ -261,12 +262,15 @@ uint8_t comfoair_checksum_(const uint8_t *data, size_t length) const {
             // Check if the next byte is also 0x07
             if ((i + 1) < length && data[i + 1] == 0x07) {
                 sum += 0x07; // Add only one 0x07
+		ESP_LOGD(TAG, "Added byte 0x07, checksum now 0x%02X", sum);
                 skip_next = true; // Skip the next 0x07
             } else {
+		ESP_LOGD(TAG, "Added byte 0x%02X, checksum now 0x%02X", data[i], sum);
                 sum += data[i]; // Single 0x07, add normally
             }
-        } else {
+        } else {	    
             sum += data[i]; // Add other bytes normally
+	    ESP_LOGD(TAG, "Added byte 0x%02X, checksum now 0x%02X", data[i], sum);
         }
 
         // Ensure sum stays within 16 bits to prevent overflow
