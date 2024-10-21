@@ -255,27 +255,27 @@ uint8_t comfoair_checksum_(const uint8_t *data, size_t length) const {
     ESP_LOGD(TAG, "Data lenght %zu.", length);
     ESP_LOGD(TAG, "Initial Sum: %u (0x%02X)", sum, sum);
     
-    while (i <= length) {
-	// ESP_LOGD(TAG, "Byte %zu: of %zu", i, length);
+    while (i < length) {
+	ESP_LOGD(TAG, "Byte %zu: of %zu", i, length);
         if (data[i] == 0x07) {
             // Check if the next byte is also 0x07 (duplicated)
             if ((i + 1) < length && data[i + 1] == 0x07) {
                 sum += 0x07;   // Add only one 0x07 to the sum
-                ESP_LOGD(TAG, "Byte %zu: 0x%02X detected as duplicated 0x07. Adding 0x07 to sum.", i, data[i]);
-                ESP_LOGD(TAG, "Sum after adding 0x07: %u (0x%02X)", sum, sum);
+                // ESP_LOGD(TAG, "Byte %zu: 0x%02X detected as duplicated 0x07. Adding 0x07 to sum.", i, data[i]);
+                // ESP_LOGD(TAG, "Sum after adding 0x07: %u (0x%02X)", sum, sum);
                 i += 2;         // Skip the duplicated 0x07
-                ESP_LOGD(TAG, "Skipping duplicated byte at position %zu.", i - 1);
+                // ESP_LOGD(TAG, "Skipping duplicated byte at position %zu.", i - 1);
 		length += 2;
             } else {
                 sum += 0x07;   // Single 0x07, add normally
-                ESP_LOGD(TAG, "Byte %zu: Single 0x07 detected. Adding 0x07 to sum.", i, data[i]);
-                ESP_LOGD(TAG, "Sum after adding 0x07: %u (0x%02X)", sum, sum);
+                // ESP_LOGD(TAG, "Byte %zu: Single 0x07 detected. Adding 0x07 to sum.", i, data[i]);
+                // ESP_LOGD(TAG, "Sum after adding 0x07: %u (0x%02X)", sum, sum);
                 i += 1;
             }
         } else {
             sum += data[i];     // Add other bytes normally
-            ESP_LOGD(TAG, "Byte %zu: 0x%02X added to sum.", i, data[i]);
-            ESP_LOGD(TAG, "Sum after adding 0x%02X: %u (0x%02X)", data[i], sum, sum);
+            // ESP_LOGD(TAG, "Byte %zu: 0x%02X added to sum.", i, data[i]);
+            // ESP_LOGD(TAG, "Sum after adding 0x%02X: %u (0x%02X)", data[i], sum, sum);
             i += 1;
         }
         
