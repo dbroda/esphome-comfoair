@@ -246,48 +246,79 @@ protected:
     flush();
 }
 
-// Corrected checksum function
-  uint8_t comfoair_checksum_(const uint8_t *command_data, uint8_t length) const {
-    uint8_t checksum = 0xAD; // Initialize checksum to 173
-    bool seven_encountered = false;
+uint8_t comfoair_checksum_(const uint8_t *data, size_t length) const {
+    uint16_t sum = 173; // Initialize with 0xAD
+    bool skip_next = false; // Flag to skip duplicated 0x07
 
-    for (uint8_t i = 0; i < length; i++) {
-      if (command_data[i] == 0x07) {
-        if (!seven_encountered) {
-          seven_encountered = true; // First 0x07 encountered
-          ESP_LOGD(TAG, "Adding byte 0x07 to checksum");
-        } else {
-          seven_encountered = false; // Second 0x07 encountered
-          ESP_LOGD(TAG, "Skipping second 0x07 byte");
-          continue; // Skip adding this 0x07 byte to the checksum
+    for (size_t i = 0; i < length; ++i) {
+        if (skip_next) {
+            // Current byte is a duplicated 0x07, skip it
+            skip_next = false;
+            continue;
         }
-      }
-      checksum += command_data[i];
-      ESP_LOGD(TAG, "Added byte 0x%02X, checksum now 0x%02X", command_data[i], checksum);
+
+        if (data[i] == 0x07) {
+            // Check if the next byte is also 0x07
+            if ((i + 1) < length && data[i + 1] == 0x07) {
+                sum += 0x07; // Add only one 0x07
+                skip_next = true; // Skip the next 0x07
+            } else {
+                sum += data[i]; // Single 0x07, add normally
+            }
+        } else {
+            sum += data[i]; // Add other bytes normally
+        }
+
+        // Ensure sum stays within 16 bits to prevent overflow
+        sum &= 0xFFFF;
     }
 
-    ESP_LOGD(TAG, "Final checksum: 0x%02X", checksum);
-    return checksum;
-  }
+    // Return only the least significant byte as the checksum
+    return static_cast<uint8_t>(sum & 0xFF);
+}
 
-// uint8_t comfoair_checksum_(const uint8_t *command_data, uint8_t length) const {
-//   uint8_t checksum = 0xAD; // Initialize checksum to 173
-//   bool seven_encountered = false;
+// // Corrected checksum function
+//   uint8_t comfoair_checksum_(const uint8_t *command_data, uint8_t length) const {
+//     uint8_t checksum = 0xAD; // Initialize checksum to 173
+//     bool seven_encountered = false;
 
-//   for (uint8_t i = 0; i < length; i++) {
-//     if (command_data[i] == 0x07) {
-//       if (!seven_encountered) {
-//         seven_encountered = true; // Mark that we've encountered the first 0x07
-//       } else {
-//         seven_encountered = false; // Reset the flag
-//         continue; // Skip adding this 0x07 byte to the checksum
+//     for (uint8_t i = 0; i < length; i++) {
+//       if (command_data[i] == 0x07) {
+//         if (!seven_encountered) {
+//           seven_encountered = true; // First 0x07 encountered
+//           ESP_LOGD(TAG, "Adding byte 0x07 to checksum");
+//         } else {
+//           seven_encountered = false; // Second 0x07 encountered
+//           ESP_LOGD(TAG, "Skipping second 0x07 byte");
+//           continue; // Skip adding this 0x07 byte to the checksum
+//         }
 //       }
+//       checksum += command_data[i];
+//       ESP_LOGD(TAG, "Added byte 0x%02X, checksum now 0x%02X", command_data[i], checksum);
 //     }
-//     checksum += command_data[i];
+
+//     ESP_LOGD(TAG, "Final checksum: 0x%02X", checksum);
+//     return checksum;
 //   }
 
-//   return checksum;
-// }
+// // uint8_t comfoair_checksum_(const uint8_t *command_data, uint8_t length) const {
+// //   uint8_t checksum = 0xAD; // Initialize checksum to 173
+// //   bool seven_encountered = false;
+
+// //   for (uint8_t i = 0; i < length; i++) {
+// //     if (command_data[i] == 0x07) {
+// //       if (!seven_encountered) {
+// //         seven_encountered = true; // Mark that we've encountered the first 0x07
+// //       } else {
+// //         seven_encountered = false; // Reset the flag
+// //         continue; // Skip adding this 0x07 byte to the checksum
+// //       }
+// //     }
+// //     checksum += command_data[i];
+// //   }
+
+// //   return checksum;
+// // }
 
 
  // uint8_t comfoair_checksum_(const uint8_t *command_data, uint8_t length) const {
@@ -337,7 +368,7 @@ protected:
       // checksum is without checksum bytes
       uint8_t checksum = comfoair_checksum_(data_ + 2, COMMAND_LEN_HEAD + data_length - 2);
       if (checksum != byte) {
-        ESP_LOGW(TAG, "%02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X", data_[0], data_[1], data_[2], data_[3], data_[4], data_[5], data_[6], data_[7], data_[8], data_[9], data_[10]);
+        // ESP_LOGW(TAG, "%02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X", data_[0], data_[1], data_[2], data_[3], data_[4], data_[5], data_[6], data_[7], data_[8], data_[9], data_[10]);
         ESP_LOGW(TAG, "ComfoAir Checksum doesn't match: 0x%02X!=0x%02X", byte, checksum);
         return false;
       }
