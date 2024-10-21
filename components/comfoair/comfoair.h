@@ -700,7 +700,7 @@ size_t calculate_message_length(const uint8_t *data) const {
         }
 
         if (level3_hours != nullptr) {
-          level3_hours->publish_state((msg[17] << 16) | (msg[18] << 8) | msg[19]);
+          level3_hours->publish_state((msg[18] << 16) | (msg[19] << 8) | msg[19]);
         }
 
         if (frost_protection_hours != nullptr) {
@@ -716,7 +716,7 @@ size_t calculate_message_length(const uint8_t *data) const {
         }
 
         if (filter_hours != nullptr) {
-          filter_hours->publish_state((msg[15] << 8) | msg[16]);
+          filter_hours->publish_state((msg[16] << 8) | msg[17]);
         }
         break;
       }
