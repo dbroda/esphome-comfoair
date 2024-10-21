@@ -251,12 +251,12 @@ uint8_t comfoair_checksum_(const uint8_t *data, size_t length) const {
     size_t i = 0;
     
     // Log the initial state
-    ESP_LOGD(TAG, "Starting checksum calculation");
-    ESP_LOGD(TAG, "Data lenght %zu.", length);
-    ESP_LOGD(TAG, "Initial Sum: %u (0x%02X)", sum, sum);
+    // ESP_LOGD(TAG, "Starting checksum calculation");
+    // ESP_LOGD(TAG, "Data lenght %zu.", length);
+    // ESP_LOGD(TAG, "Initial Sum: %u (0x%02X)", sum, sum);
     
     while (i < length) {
-	ESP_LOGD(TAG, "Byte %zu: of %zu", i, length);
+	// ESP_LOGD(TAG, "Byte %zu: of %zu", i, length);
         if (data[i] == 0x07) {
             // Check if the next byte is also 0x07 (duplicated)
             if ((i + 1) < length && data[i + 1] == 0x07) {
@@ -285,7 +285,7 @@ uint8_t comfoair_checksum_(const uint8_t *data, size_t length) const {
     
     // Extract the least significant byte as the checksum
     uint8_t checksum = static_cast<uint8_t>(sum & 0xFF);
-    ESP_LOGD(TAG, "Final Sum: %u (0x%02X)", sum, sum);
+    // ESP_LOGD(TAG, "Final Sum: %u (0x%02X)", sum, sum);
     ESP_LOGD(TAG, "Calculated Checksum (LSB): 0x%02X", checksum);
     
     return checksum;
@@ -369,7 +369,7 @@ uint8_t comfoair_checksum_(const uint8_t *data, size_t length) const {
       return true;
     }
 
-    uint8_t data_length = data_[COMMAND_IDX_DATA];
+    uint8_t data_length = calculate_message_length(data_);
 
     if ((COMMAND_LEN_HEAD + data_length + COMMAND_LEN_TAIL) > sizeof(data_)) {
       ESP_LOGW(TAG, "ComfoAir message too large");
@@ -403,6 +403,33 @@ uint8_t comfoair_checksum_(const uint8_t *data, size_t length) const {
 
     return {};
   }
+
+size_t calculate_message_length(const uint8_t *data) const {
+    // Read the initial data length from the specified index
+    uint8_t initial_data_length = data[COMMAND_IDX_DATA];
+    size_t actual_length = initial_data_length;
+
+    // Define the start and end indices of the data payload within the buffer
+    size_t payload_start = COMMAND_IDX_DATA + 1; // Assuming data starts right after data_length
+    size_t payload_end = payload_start + initial_data_length;
+
+    // ESP_LOGD(TAG, "Calculating message length");
+    // ESP_LOGD(TAG, "Initial Data Length from data_[%d]: %u", COMMAND_IDX_DATA, initial_data_length);
+
+    // Iterate through the data payload to find duplicated 0x07 bytes
+    for (size_t i = payload_start; i < payload_end - 1; ++i) {
+        if (data[i] == 0x07 && data[i + 1] == 0x07) {
+            // Found two consecutive 0x07 bytes (byte-stuffing)
+            actual_length += 1; // Increment actual message length by one
+            // ESP_LOGD(TAG, "Found duplicated 0x07 at positions %zu and %zu. Incrementing actual_length to %zu.", i, i + 1, actual_length);
+            i += 1; // Skip the next 0x07 as it's a duplicate
+        }
+    }
+
+    // ESP_LOGD(TAG, "Calculated Actual Message Length: %zu bytes", actual_length);
+    return actual_length;
+}
+
 
   void parse_data_() {
     status_clear_warning();
