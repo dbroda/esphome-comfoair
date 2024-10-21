@@ -248,38 +248,31 @@ protected:
 
 uint8_t comfoair_checksum_(const uint8_t *data, size_t length) const {
     uint16_t sum = 173; // Initialize with 0xAD
-    bool skip_next = false; // Flag to skip duplicated 0x07
-
-    for (size_t i = 0; i < length; ++i) {
-        if (skip_next) {
-            // Current byte is a duplicated 0x07, skip it
-	    ESP_LOGD(TAG, "Skipping next byte");
-            skip_next = false;
-            continue;
-        }
-
+    size_t i = 0;
+    
+    while (i < length) {
         if (data[i] == 0x07) {
-            // Check if the next byte is also 0x07
+            // Check if the next byte is also 0x07 (duplicated)
             if ((i + 1) < length && data[i + 1] == 0x07) {
-                sum += 0x07; // Add only one 0x07
-		ESP_LOGD(TAG, "Added byte 0x07, checksum now 0x%02X", sum);
-                skip_next = true; // Skip the next 0x07
+                sum += 0x07;   // Add only one 0x07 to the sum
+                i += 2;         // Skip the duplicated 0x07
             } else {
-		ESP_LOGD(TAG, "Added byte 0x%02X, checksum now 0x%02X", data[i], sum);
-                sum += data[i]; // Single 0x07, add normally
+                sum += 0x07;   // Single 0x07, add normally
+                i += 1;
             }
-        } else {	    
-            sum += data[i]; // Add other bytes normally
-	    ESP_LOGD(TAG, "Added byte 0x%02X, checksum now 0x%02X", data[i], sum);
+        } else {
+            sum += data[i];     // Add other bytes normally
+            i += 1;
         }
-
+        
         // Ensure sum stays within 16 bits to prevent overflow
         sum &= 0xFFFF;
     }
-
+    
     // Return only the least significant byte as the checksum
     return static_cast<uint8_t>(sum & 0xFF);
 }
+
 
 // // Corrected checksum function
 //   uint8_t comfoair_checksum_(const uint8_t *command_data, uint8_t length) const {
