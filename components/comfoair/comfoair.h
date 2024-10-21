@@ -385,9 +385,63 @@ size_t calculate_message_length(const uint8_t *data) const {
 }
 
 
+uint8_t* copy_without_duplicates(const uint8_t *data) const {
+    // Step 1: Calculate the actual message length using the existing function
+    size_t actual_length = calculate_message_length(data);
+
+    // Step 2: Allocate memory for the cleaned message
+    uint8_t* clean_data = new uint8_t[actual_length];
+    if (clean_data == nullptr) {
+        ESP_LOGE(TAG, "Memory allocation failed in copy_without_duplicates()");
+        return nullptr; // Return nullptr if memory allocation fails
+    }
+
+    // Step 3: Read the initial data_length from the specified index
+    uint8_t initial_data_length = data[COMMAND_IDX_DATA];
+    size_t payload_start = COMMAND_IDX_DATA + 1; // Start of data payload
+    size_t payload_end = payload_start + initial_data_length; // End of data payload
+
+    ESP_LOGD(TAG, "Starting copy_without_duplicates()");
+    ESP_LOGD(TAG, "Initial Data Length from data_[%d]: %u", COMMAND_IDX_DATA, initial_data_length);
+
+    size_t j = 0; // Index for clean_data
+
+    // Step 4: Iterate through the data payload
+    for (size_t i = payload_start; i < payload_end; ++i) {
+        if (data[i] == 0x07) {
+            // Check if the next byte is also 0x07 (duplicated)
+            if ((i + 1) < payload_end && data[i + 1] == 0x07) {
+                // Found duplicated 0x07 bytes
+                clean_data[j++] = 0x07; // Add only one 0x07 to clean_data
+                ESP_LOGD(TAG, "Duplicated 0x07 found at positions %zu and %zu. Adding single 0x07 to clean_data.", i, i + 1);
+                i += 1; // Skip the duplicated byte
+            } else {
+                // Single 0x07 byte, add normally
+                clean_data[j++] = data[i];
+                ESP_LOGD(TAG, "Single 0x07 found at position %zu. Adding to clean_data.", i);
+            }
+        } else {
+            // Non-0x07 byte, add normally
+            clean_data[j++] = data[i];
+            ESP_LOGD(TAG, "Adding byte 0x%02X from position %zu to clean_data.", data[i], i);
+        }
+
+        // Optional: Prevent writing beyond allocated buffer
+        if (j > actual_length) {
+            ESP_LOGE(TAG, "Index out of bounds while copying data. j: %zu, actual_length: %zu", j, actual_length);
+            delete[] clean_data; // Free allocated memory before returning
+            return nullptr;
+        }
+    }
+
+    ESP_LOGD(TAG, "Completed copy_without_duplicates(). Clean data size: %zu bytes.", j);
+    return clean_data;
+}
+
   void parse_data_() {
     status_clear_warning();
-    uint8_t *msg = &data_[COMMAND_LEN_HEAD];
+    uint8_t *data_without_duplicates = copy_without_duplicates(data_);
+    uint8_t *msg = &data_without_duplicates[COMMAND_LEN_HEAD];
 
     switch (data_[COMMAND_IDX_MSG_ID]) {
       case RES_GET_BOOTLOADER_VERSION:
