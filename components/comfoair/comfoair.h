@@ -440,8 +440,8 @@ uint8_t* copy_without_duplicates(const uint8_t *data) const {
 
   void parse_data_() {
     status_clear_warning();
-    uint8_t *data_without_duplicates = copy_without_duplicates(data_);
-    uint8_t *msg = &data_without_duplicates[COMMAND_LEN_HEAD];
+    uint8_t *msg = copy_without_duplicates(&data_[COMMAND_LEN_HEAD]);
+    // uint8_t *msg = &data_without_duplicates[COMMAND_LEN_HEAD];
 
     switch (data_[COMMAND_IDX_MSG_ID]) {
       case RES_GET_BOOTLOADER_VERSION:
