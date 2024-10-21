@@ -252,6 +252,7 @@ uint8_t comfoair_checksum_(const uint8_t *data, size_t length) const {
     
     // Log the initial state
     ESP_LOGD(TAG, "Starting checksum calculation");
+    ESP_LOGD(TAG, "Data lenght %zu.", length);
     ESP_LOGD(TAG, "Initial Sum: %u (0x%02X)", sum, sum);
     
     while (i < length) {
