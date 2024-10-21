@@ -250,18 +250,29 @@ uint8_t comfoair_checksum_(const uint8_t *data, size_t length) const {
     uint16_t sum = 173; // Initialize with 0xAD
     size_t i = 0;
     
+    // Log the initial state
+    ESP_LOGD(TAG, "Starting checksum calculation");
+    ESP_LOGD(TAG, "Initial Sum: %u (0x%02X)", sum, sum);
+    
     while (i < length) {
         if (data[i] == 0x07) {
             // Check if the next byte is also 0x07 (duplicated)
             if ((i + 1) < length && data[i + 1] == 0x07) {
                 sum += 0x07;   // Add only one 0x07 to the sum
+                ESP_LOGD(TAG, "Byte %zu: 0x%02X detected as duplicated 0x07. Adding 0x07 to sum.", i, data[i]);
+                ESP_LOGD(TAG, "Sum after adding 0x07: %u (0x%02X)", sum, sum);
                 i += 2;         // Skip the duplicated 0x07
+                ESP_LOGD(TAG, "Skipping duplicated byte at position %zu.", i - 1);
             } else {
                 sum += 0x07;   // Single 0x07, add normally
+                ESP_LOGD(TAG, "Byte %zu: Single 0x07 detected. Adding 0x07 to sum.", i, data[i]);
+                ESP_LOGD(TAG, "Sum after adding 0x07: %u (0x%02X)", sum, sum);
                 i += 1;
             }
         } else {
             sum += data[i];     // Add other bytes normally
+            ESP_LOGD(TAG, "Byte %zu: 0x%02X added to sum.", i, data[i]);
+            ESP_LOGD(TAG, "Sum after adding 0x%02X: %u (0x%02X)", data[i], sum, sum);
             i += 1;
         }
         
@@ -269,9 +280,14 @@ uint8_t comfoair_checksum_(const uint8_t *data, size_t length) const {
         sum &= 0xFFFF;
     }
     
-    // Return only the least significant byte as the checksum
-    return static_cast<uint8_t>(sum & 0xFF);
+    // Extract the least significant byte as the checksum
+    uint8_t checksum = static_cast<uint8_t>(sum & 0xFF);
+    ESP_LOGD(TAG, "Final Sum: %u (0x%02X)", sum, sum);
+    ESP_LOGD(TAG, "Calculated Checksum (LSB): 0x%02X", checksum);
+    
+    return checksum;
 }
+
 
 
 // // Corrected checksum function
