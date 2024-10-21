@@ -264,7 +264,7 @@ uint8_t comfoair_checksum_(const uint8_t *data, size_t length) const {
                 ESP_LOGD(TAG, "Sum after adding 0x07: %u (0x%02X)", sum, sum);
                 i += 2;         // Skip the duplicated 0x07
                 ESP_LOGD(TAG, "Skipping duplicated byte at position %zu.", i - 1);
-		lenght += 1;
+		length += 1;
             } else {
                 sum += 0x07;   // Single 0x07, add normally
                 ESP_LOGD(TAG, "Byte %zu: Single 0x07 detected. Adding 0x07 to sum.", i, data[i]);
