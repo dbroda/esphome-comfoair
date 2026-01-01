@@ -8,6 +8,7 @@
 #include "esphome/components/climate/climate_traits.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/select/select.h"
+#include "esphome/components/text_sensor/text_sensor.h"
 #include "registers.h"
 
 namespace esphome {
