@@ -7,3 +7,4 @@
 /root@
 secrets.yaml
 .esphome
+__pycache__
