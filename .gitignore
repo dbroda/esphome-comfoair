@@ -6,3 +6,4 @@
 /.vs
 /root@
 secrets.yaml
+.esphome
