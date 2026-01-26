@@ -212,7 +212,11 @@ public:
     write_command_(CMD_RESET_AND_SELF_TEST, reset_cmd, sizeof(reset_cmd));
 	}
 
-  void set_name(const char* value) {name = value;}
+  void set_name(const char* value) { name = value; }
+  void set_name(const char* value, uint32_t name_hash) {
+    (void) name_hash;
+    name = value;
+  }
   void set_uart_component(uart::UARTComponent *parent) {set_uart_parent(parent);}
   bool set_unit_size(uint8_t raw_size);
   void set_size_select(ComfoAirSizeSelect *size_select);

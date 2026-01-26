@@ -5,3 +5,6 @@
 /.vs/slnx.sqlite
 /.vs
 /root@
+secrets.yaml
+.esphome
+__pycache__
