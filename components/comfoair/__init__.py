@@ -2,21 +2,24 @@
 
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import binary_sensor, sensor, text_sensor, uart, climate, select, number
+from esphome.components import binary_sensor, sensor, text_sensor, uart, climate, select, number, button
 from esphome.const import (CONF_ID, CONF_UART_ID, DEVICE_CLASS_CURRENT,
                            DEVICE_CLASS_EMPTY, DEVICE_CLASS_SPEED,
                            DEVICE_CLASS_TEMPERATURE, DEVICE_CLASS_VOLUME, DEVICE_CLASS_VOLTAGE,
                            STATE_CLASS_MEASUREMENT, UNIT_AMPERE, UNIT_CELSIUS,
                            UNIT_CUBIC_METER, UNIT_HOUR, UNIT_MINUTE, UNIT_VOLT,
-                           UNIT_PERCENT, UNIT_REVOLUTIONS_PER_MINUTE, CONF_DISABLED_BY_DEFAULT)
+                           UNIT_PERCENT, UNIT_REVOLUTIONS_PER_MINUTE, CONF_DISABLED_BY_DEFAULT,
+                           DEVICE_CLASS_RESTART)
 
 comfoair_ns = cg.esphome_ns.namespace("comfoair")
 ComfoAirComponent = comfoair_ns.class_('ComfoAirComponent', climate.Climate, cg.Component, uart.UARTDevice)
 ComfoAirVentilationLevelNumber = comfoair_ns.class_("ComfoAirVentilationLevelNumber", number.Number)
 ComfoAirTimeDelayNumber = comfoair_ns.class_("ComfoAirTimeDelayNumber", number.Number)
+ComfoAirResetErrorsButton = comfoair_ns.class_("ComfoAirResetErrorsButton", button.Button)
+ComfoAirStartSelfTestButton = comfoair_ns.class_("ComfoAirStartSelfTestButton", button.Button)
 
 DEPENDENCIES = ["uart"]
-AUTO_LOAD = ["sensor", "climate", "binary_sensor", "text_sensor", "select", "number"]
+AUTO_LOAD = ["sensor", "climate", "binary_sensor", "text_sensor", "select", "number", "button"]
 REQUIRED_KEY_NAME = "name"
 CONF_HUB_ID = "comfoair"
 
@@ -37,7 +40,7 @@ CONF_RETURN_AIR_TEMPERATURE = "return_air_temperature"
 CONF_EXHAUST_AIR_TEMPERATURE = "exhaust_air_temperature"
 CONF_ENTHALPY_TEMPERATURE = "enthalpy_temperature"
 CONF_EWT_TEMPERATURE = "ewt_temperature"
-CONF_REHEATING_TEMPERATURE = "reheating_temperature"
+CONF_POSTHEATING_TEMPERATURE = "postheating_temperature"
 CONF_KITCHEN_HOOD_TEMPERATURE = "kitchen_hood_temperature"
 CONF_RETURN_AIR_LEVEL = "return_air_level"
 CONF_SUPPLY_AIR_LEVEL = "supply_air_level"
@@ -163,6 +166,10 @@ CONF_ANALOG_INPUT_2 = "analog_input_2"
 CONF_ANALOG_INPUT_3 = "analog_input_3"
 CONF_ANALOG_INPUT_4 = "analog_input_4"
 
+# Button entities
+CONF_RESET_ERRORS = "reset_errors"
+CONF_START_SELF_TEST = "start_self_test"
+
 helper_comfoair = {
     "sensor": [
         CONF_INTAKE_FAN_SPEED,
@@ -176,7 +183,7 @@ helper_comfoair = {
         CONF_EXHAUST_AIR_TEMPERATURE,
         CONF_ENTHALPY_TEMPERATURE,
         CONF_EWT_TEMPERATURE,
-        CONF_REHEATING_TEMPERATURE,
+        CONF_POSTHEATING_TEMPERATURE,
         CONF_KITCHEN_HOOD_TEMPERATURE,
         CONF_RETURN_AIR_LEVEL,
         CONF_SUPPLY_AIR_LEVEL,
@@ -312,6 +319,10 @@ helper_comfoair = {
         CONF_RF_HIGH_TIME_LONG_MINUTES_NUMBER,
         CONF_EXTRACTOR_HOOD_SWITCH_OFF_DELAY_MINUTES_NUMBER,
     ],
+    "button": [
+        CONF_RESET_ERRORS,
+        CONF_START_SELF_TEST,
+    ],
 }
 
 ComfoAirSizeSelect = comfoair_ns.class_("ComfoAirSizeSelect", select.Select)
@@ -392,7 +403,7 @@ comfoair_sensors_schemas = cv.Schema(
             accuracy_decimals=1,
             state_class=STATE_CLASS_MEASUREMENT,
         ).extend(),
-        cv.Optional(CONF_REHEATING_TEMPERATURE): sensor.sensor_schema(
+        cv.Optional(CONF_POSTHEATING_TEMPERATURE): sensor.sensor_schema(
             device_class=DEVICE_CLASS_TEMPERATURE,
             unit_of_measurement=UNIT_CELSIUS,
             accuracy_decimals=1,
@@ -708,6 +719,16 @@ comfoair_sensors_schemas = cv.Schema(
             state_class=STATE_CLASS_MEASUREMENT,
         ).extend(),
         
+        # Button entities
+        cv.Optional(CONF_RESET_ERRORS): button.button_schema(
+            ComfoAirResetErrorsButton,
+            device_class=DEVICE_CLASS_RESTART,
+        ).extend(),
+        cv.Optional(CONF_START_SELF_TEST): button.button_schema(
+            ComfoAirStartSelfTestButton,
+            device_class=DEVICE_CLASS_RESTART,
+        ).extend(),
+        
         # Ventilation level number components
         cv.Optional(CONF_SUPPLY_ABSENT_PERCENT): number.number_schema(
             ComfoAirVentilationLevelNumber,
@@ -888,7 +909,7 @@ def to_code(config):
             func = getattr(var, "set_" + conf_key)
             cg.add(func(sens))
     
-    # Handle all other components (sensors, binary_sensors, text_sensors, select)
+    # Handle all other components (sensors, binary_sensors, text_sensors, select, buttons)
     for k, values in helper_comfoair.items():
         if k == "number":
             # Already handled above
@@ -905,6 +926,10 @@ def to_code(config):
                 sens = yield text_sensor.new_text_sensor(config[v])
             elif k == "select":
                 sens = yield select.new_select(config[v], options=["Large", "Small"])
+            elif k == "button":
+                sens = yield button.new_button(config[v])
+                # Buttons need parent set
+                cg.add(sens.set_parent(var))
             if sens is not None:
                 func = getattr(var, "set_" + v)
                 cg.add(func(sens))

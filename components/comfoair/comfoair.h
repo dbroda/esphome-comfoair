@@ -9,6 +9,7 @@
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/select/select.h"
 #include "esphome/components/number/number.h"
+#include "esphome/components/button/button.h"
 #include "esphome/components/text_sensor/text_sensor.h"
 #include "registers.h"
 
@@ -61,11 +62,37 @@ namespace esphome
       uint8_t delay_index_{0};
     };
 
+    class ComfoAirResetErrorsButton : public button::Button
+    {
+    public:
+      void set_parent(ComfoAirComponent *parent) { this->parent_ = parent; }
+
+    protected:
+      void press_action() override;
+
+    private:
+      ComfoAirComponent *parent_{nullptr};
+    };
+
+    class ComfoAirStartSelfTestButton : public button::Button
+    {
+    public:
+      void set_parent(ComfoAirComponent *parent) { this->parent_ = parent; }
+
+    protected:
+      void press_action() override;
+
+    private:
+      ComfoAirComponent *parent_{nullptr};
+    };
+
     class ComfoAirComponent : public climate::Climate, public PollingComponent, public uart::UARTDevice
     {
       friend class ComfoAirSizeSelect;
       friend class ComfoAirVentilationLevelNumber;
       friend class ComfoAirTimeDelayNumber;
+      friend class ComfoAirResetErrorsButton;
+      friend class ComfoAirStartSelfTestButton;
 
     public:
       // Poll every 600ms
@@ -778,10 +805,10 @@ namespace esphome
           {
             ewt_temperature->publish_state((float)msg[6] / 2.0f - 20.0f);
           }
-          // reheating
-          if (reheating_temperature != nullptr && msg[5] & 0x20)
+          // postheating
+          if (postheating_temperature != nullptr && msg[5] & 0x20)
           {
-            reheating_temperature->publish_state((float)msg[7] / 2.0f - 20.0f);
+            postheating_temperature->publish_state((float)msg[7] / 2.0f - 20.0f);
           }
           // kitchen hood
           if (kitchen_hood_temperature != nullptr && msg[5] & 0x40)
@@ -1377,7 +1404,7 @@ namespace esphome
       sensor::Sensor *exhaust_air_temperature{nullptr};
       sensor::Sensor *enthalpy_temperature{nullptr};
       sensor::Sensor *ewt_temperature{nullptr};
-      sensor::Sensor *reheating_temperature{nullptr};
+      sensor::Sensor *postheating_temperature{nullptr};
       sensor::Sensor *kitchen_hood_temperature{nullptr};
       sensor::Sensor *return_air_level{nullptr};
       sensor::Sensor *supply_air_level{nullptr};
@@ -1498,6 +1525,10 @@ namespace esphome
       sensor::Sensor *analog_input_2{nullptr};
       sensor::Sensor *analog_input_3{nullptr};
       sensor::Sensor *analog_input_4{nullptr};
+      
+      // Button entities
+      button::Button *reset_errors_{nullptr};
+      button::Button *start_self_test_{nullptr};
 
       void set_type(text_sensor::TextSensor *type) { this->type = type; };
       void set_size(text_sensor::TextSensor *size) { this->size = size; };
@@ -1532,7 +1563,7 @@ namespace esphome
       void set_exhaust_air_temperature(sensor::Sensor *exhaust_air_temperature) { this->exhaust_air_temperature = exhaust_air_temperature; };
       void set_enthalpy_temperature(sensor::Sensor *enthalpy_temperature) { this->enthalpy_temperature = enthalpy_temperature; };
       void set_ewt_temperature(sensor::Sensor *ewt_temperature) { this->ewt_temperature = ewt_temperature; };
-      void set_reheating_temperature(sensor::Sensor *reheating_temperature) { this->reheating_temperature = reheating_temperature; };
+      void set_postheating_temperature(sensor::Sensor *postheating_temperature) { this->postheating_temperature = postheating_temperature; };
       void set_kitchen_hood_temperature(sensor::Sensor *kitchen_hood_temperature) { this->kitchen_hood_temperature = kitchen_hood_temperature; };
       void set_return_air_level(sensor::Sensor *return_air_level) { this->return_air_level = return_air_level; };
       void set_supply_air_level(sensor::Sensor *supply_air_level) { this->supply_air_level = supply_air_level; };
@@ -1639,6 +1670,9 @@ namespace esphome
       void set_analog_input_2(sensor::Sensor *analog_input_2) { this->analog_input_2 = analog_input_2; };
       void set_analog_input_3(sensor::Sensor *analog_input_3) { this->analog_input_3 = analog_input_3; };
       void set_analog_input_4(sensor::Sensor *analog_input_4) { this->analog_input_4 = analog_input_4; };
+      
+      void set_reset_errors(button::Button *reset_errors) { this->reset_errors_ = reset_errors; };
+      void set_start_self_test(button::Button *start_self_test) { this->start_self_test_ = start_self_test; };
     };
 
     inline const char *ComfoAirComponent::unit_size_text_label_(uint8_t raw_size) const
@@ -1802,6 +1836,32 @@ namespace esphome
         // Revert to current value if setting failed
         this->publish_state(this->parent_->time_delays_[this->delay_index_]);
       }
+    }
+
+    inline void ComfoAirResetErrorsButton::press_action()
+    {
+      if (this->parent_ == nullptr)
+      {
+        ESP_LOGW(TAG, "Reset errors button has no parent component configured");
+        return;
+      }
+      
+      ESP_LOGI(TAG, "Resetting ComfoAir error codes");
+      uint8_t reset_cmd[4] = {1, 0, 0, 0}; // Reset faults only (byte 0)
+      this->parent_->write_command_(CMD_RESET_AND_SELF_TEST, reset_cmd, sizeof(reset_cmd));
+    }
+
+    inline void ComfoAirStartSelfTestButton::press_action()
+    {
+      if (this->parent_ == nullptr)
+      {
+        ESP_LOGW(TAG, "Start self-test button has no parent component configured");
+        return;
+      }
+      
+      ESP_LOGI(TAG, "Starting ComfoAir self-test diagnostic mode");
+      uint8_t test_cmd[4] = {0, 0, 1, 0}; // Start self-test (byte 2)
+      this->parent_->write_command_(CMD_RESET_AND_SELF_TEST, test_cmd, sizeof(test_cmd));
     }
 
   } // namespace comfoair

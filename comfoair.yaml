@@ -75,8 +75,8 @@ comfoair:
     name: "enthalpy_temperature"
   ewt_temperature:
     name: "ewt_temperature"
-  reheating_temperature:
-    name: "reheating_temperature"
+  postheating_temperature:
+    name: "postheating_temperature"
   kitchen_hood_temperature:
     name: "kitchen_hood_temperature"
   return_air_level:
