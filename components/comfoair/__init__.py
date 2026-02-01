@@ -2,19 +2,21 @@
 
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import binary_sensor, sensor, text_sensor, uart, climate, select
+from esphome.components import binary_sensor, sensor, text_sensor, uart, climate, select, number
 from esphome.const import (CONF_ID, CONF_UART_ID, DEVICE_CLASS_CURRENT,
                            DEVICE_CLASS_EMPTY, DEVICE_CLASS_SPEED,
-                           DEVICE_CLASS_TEMPERATURE, DEVICE_CLASS_VOLUME,
+                           DEVICE_CLASS_TEMPERATURE, DEVICE_CLASS_VOLUME, DEVICE_CLASS_VOLTAGE,
                            STATE_CLASS_MEASUREMENT, UNIT_AMPERE, UNIT_CELSIUS,
-                           UNIT_CUBIC_METER, UNIT_HOUR, UNIT_MINUTE,
+                           UNIT_CUBIC_METER, UNIT_HOUR, UNIT_MINUTE, UNIT_VOLT,
                            UNIT_PERCENT, UNIT_REVOLUTIONS_PER_MINUTE, CONF_DISABLED_BY_DEFAULT)
 
 comfoair_ns = cg.esphome_ns.namespace("comfoair")
 ComfoAirComponent = comfoair_ns.class_('ComfoAirComponent', climate.Climate, cg.Component, uart.UARTDevice)
+ComfoAirVentilationLevelNumber = comfoair_ns.class_("ComfoAirVentilationLevelNumber", number.Number)
+ComfoAirTimeDelayNumber = comfoair_ns.class_("ComfoAirTimeDelayNumber", number.Number)
 
 DEPENDENCIES = ["uart"]
-AUTO_LOAD = ["sensor", "climate", "binary_sensor", "text_sensor", "select"]
+AUTO_LOAD = ["sensor", "climate", "binary_sensor", "text_sensor", "select", "number"]
 REQUIRED_KEY_NAME = "name"
 CONF_HUB_ID = "comfoair"
 
@@ -99,6 +101,68 @@ CONF_RF_HIGH_TIME_SHORT_MINUTES = "rf_high_time_short_minutes"
 CONF_RF_HIGH_TIME_LONG_MINUTES = "rf_high_time_long_minutes"
 CONF_EXTRACTOR_HOOD_SWITCH_OFF_DELAY_MINUTES = "extractor_hood_switch_off_delay_minutes"
 
+# Error code binary sensors
+CONF_ERROR_A1 = "error_a1"
+CONF_ERROR_A2 = "error_a2"
+CONF_ERROR_A3 = "error_a3"
+CONF_ERROR_A4 = "error_a4"
+CONF_ERROR_A5 = "error_a5"
+CONF_ERROR_A6 = "error_a6"
+CONF_ERROR_A7 = "error_a7"
+CONF_ERROR_A8 = "error_a8"
+CONF_ERROR_A9 = "error_a9"
+CONF_ERROR_A10 = "error_a10"
+CONF_ERROR_A11 = "error_a11"
+CONF_ERROR_A12 = "error_a12"
+CONF_ERROR_A13 = "error_a13"
+CONF_ERROR_A14 = "error_a14"
+CONF_ERROR_A15 = "error_a15"
+CONF_ERROR_E1 = "error_e1"
+CONF_ERROR_E2 = "error_e2"
+CONF_ERROR_EA1 = "error_ea1"
+CONF_ERROR_EA2 = "error_ea2"
+CONF_ERROR_EA3 = "error_ea3"
+CONF_ERROR_EA4 = "error_ea4"
+CONF_ERROR_EA5 = "error_ea5"
+CONF_ERROR_EA6 = "error_ea6"
+CONF_ERROR_EA7 = "error_ea7"
+CONF_ERROR_EA8 = "error_ea8"
+
+# Ventilation level number components
+CONF_SUPPLY_ABSENT_PERCENT = "supply_absent_percent"
+CONF_SUPPLY_LOW_PERCENT = "supply_low_percent"
+CONF_SUPPLY_MEDIUM_PERCENT = "supply_medium_percent"
+CONF_SUPPLY_HIGH_PERCENT = "supply_high_percent"
+CONF_EXHAUST_ABSENT_PERCENT = "exhaust_absent_percent"
+CONF_EXHAUST_LOW_PERCENT = "exhaust_low_percent"
+CONF_EXHAUST_MEDIUM_PERCENT = "exhaust_medium_percent"
+CONF_EXHAUST_HIGH_PERCENT = "exhaust_high_percent"
+
+# Time delay number components
+CONF_BATHROOM_SWITCH_ON_DELAY_MINUTES_NUMBER = "bathroom_switch_on_delay_minutes_number"
+CONF_BATHROOM_SWITCH_OFF_DELAY_MINUTES_NUMBER = "bathroom_switch_off_delay_minutes_number"
+CONF_L1_SWITCH_OFF_DELAY_MINUTES_NUMBER = "l1_switch_off_delay_minutes_number"
+CONF_BOOST_VENTILATION_MINUTES_NUMBER = "boost_ventilation_minutes_number"
+CONF_FILTER_WARNING_WEEKS_NUMBER = "filter_warning_weeks_number"
+CONF_RF_HIGH_TIME_SHORT_MINUTES_NUMBER = "rf_high_time_short_minutes_number"
+CONF_RF_HIGH_TIME_LONG_MINUTES_NUMBER = "rf_high_time_long_minutes_number"
+CONF_EXTRACTOR_HOOD_SWITCH_OFF_DELAY_MINUTES_NUMBER = "extractor_hood_switch_off_delay_minutes_number"
+
+# Digital input binary sensors
+CONF_INPUT_L1 = "input_l1"
+CONF_INPUT_L2 = "input_l2"
+CONF_INPUT_BATHROOM_SWITCH = "input_bathroom_switch"
+CONF_INPUT_KITCHEN_HOOD_SWITCH = "input_kitchen_hood_switch"
+CONF_INPUT_EXTERNAL_FILTER = "input_external_filter"
+CONF_INPUT_WTW = "input_wtw"
+CONF_INPUT_BATHROOM_SWITCH_2 = "input_bathroom_switch_2"
+
+# Analog input sensors
+CONF_ANALOG_INPUT_1 = "analog_input_1"
+CONF_ANALOG_INPUT_2 = "analog_input_2"
+CONF_ANALOG_INPUT_3 = "analog_input_3"
+CONF_ANALOG_INPUT_4 = "analog_input_4"
+
 helper_comfoair = {
     "sensor": [
         CONF_INTAKE_FAN_SPEED,
@@ -139,6 +203,12 @@ helper_comfoair = {
         CONF_RF_HIGH_TIME_SHORT_MINUTES,
         CONF_RF_HIGH_TIME_LONG_MINUTES,
         CONF_EXTRACTOR_HOOD_SWITCH_OFF_DELAY_MINUTES,
+        
+        # Analog inputs
+        CONF_ANALOG_INPUT_1,
+        CONF_ANALOG_INPUT_2,
+        CONF_ANALOG_INPUT_3,
+        CONF_ANALOG_INPUT_4,
     ],
     "binary_sensor": [
         CONF_BYPASS_PRESENT,
@@ -174,6 +244,42 @@ helper_comfoair = {
         CONF_P95_ACTIVE,
         CONF_P96_ACTIVE,
         CONF_P97_ACTIVE,
+        
+        # Error codes
+        CONF_ERROR_A1,
+        CONF_ERROR_A2,
+        CONF_ERROR_A3,
+        CONF_ERROR_A4,
+        CONF_ERROR_A5,
+        CONF_ERROR_A6,
+        CONF_ERROR_A7,
+        CONF_ERROR_A8,
+        CONF_ERROR_A9,
+        CONF_ERROR_A10,
+        CONF_ERROR_A11,
+        CONF_ERROR_A12,
+        CONF_ERROR_A13,
+        CONF_ERROR_A14,
+        CONF_ERROR_A15,
+        CONF_ERROR_E1,
+        CONF_ERROR_E2,
+        CONF_ERROR_EA1,
+        CONF_ERROR_EA2,
+        CONF_ERROR_EA3,
+        CONF_ERROR_EA4,
+        CONF_ERROR_EA5,
+        CONF_ERROR_EA6,
+        CONF_ERROR_EA7,
+        CONF_ERROR_EA8,
+        
+        # Digital inputs
+        CONF_INPUT_L1,
+        CONF_INPUT_L2,
+        CONF_INPUT_BATHROOM_SWITCH,
+        CONF_INPUT_KITCHEN_HOOD_SWITCH,
+        CONF_INPUT_EXTERNAL_FILTER,
+        CONF_INPUT_WTW,
+        CONF_INPUT_BATHROOM_SWITCH_2,
     ],
     "text_sensor": [
         CONF_TYPE,
@@ -184,6 +290,27 @@ helper_comfoair = {
     ],
     "select": [
         CONF_SIZE_SELECT,
+    ],
+    "number": [
+        # Ventilation levels
+        CONF_SUPPLY_ABSENT_PERCENT,
+        CONF_SUPPLY_LOW_PERCENT,
+        CONF_SUPPLY_MEDIUM_PERCENT,
+        CONF_SUPPLY_HIGH_PERCENT,
+        CONF_EXHAUST_ABSENT_PERCENT,
+        CONF_EXHAUST_LOW_PERCENT,
+        CONF_EXHAUST_MEDIUM_PERCENT,
+        CONF_EXHAUST_HIGH_PERCENT,
+        
+        # Time delays
+        CONF_BATHROOM_SWITCH_ON_DELAY_MINUTES_NUMBER,
+        CONF_BATHROOM_SWITCH_OFF_DELAY_MINUTES_NUMBER,
+        CONF_L1_SWITCH_OFF_DELAY_MINUTES_NUMBER,
+        CONF_BOOST_VENTILATION_MINUTES_NUMBER,
+        CONF_FILTER_WARNING_WEEKS_NUMBER,
+        CONF_RF_HIGH_TIME_SHORT_MINUTES_NUMBER,
+        CONF_RF_HIGH_TIME_LONG_MINUTES_NUMBER,
+        CONF_EXTRACTOR_HOOD_SWITCH_OFF_DELAY_MINUTES_NUMBER,
     ],
 }
 
@@ -518,6 +645,152 @@ comfoair_sensors_schemas = cv.Schema(
         cv.Optional(CONF_P97_ACTIVE): binary_sensor.binary_sensor_schema(
             device_class=DEVICE_CLASS_EMPTY
         ).extend(),
+        
+        # Error code binary sensors
+        cv.Optional(CONF_ERROR_A1): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_EMPTY).extend(),
+        cv.Optional(CONF_ERROR_A2): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_EMPTY).extend(),
+        cv.Optional(CONF_ERROR_A3): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_EMPTY).extend(),
+        cv.Optional(CONF_ERROR_A4): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_EMPTY).extend(),
+        cv.Optional(CONF_ERROR_A5): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_EMPTY).extend(),
+        cv.Optional(CONF_ERROR_A6): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_EMPTY).extend(),
+        cv.Optional(CONF_ERROR_A7): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_EMPTY).extend(),
+        cv.Optional(CONF_ERROR_A8): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_EMPTY).extend(),
+        cv.Optional(CONF_ERROR_A9): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_EMPTY).extend(),
+        cv.Optional(CONF_ERROR_A10): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_EMPTY).extend(),
+        cv.Optional(CONF_ERROR_A11): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_EMPTY).extend(),
+        cv.Optional(CONF_ERROR_A12): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_EMPTY).extend(),
+        cv.Optional(CONF_ERROR_A13): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_EMPTY).extend(),
+        cv.Optional(CONF_ERROR_A14): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_EMPTY).extend(),
+        cv.Optional(CONF_ERROR_A15): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_EMPTY).extend(),
+        cv.Optional(CONF_ERROR_E1): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_EMPTY).extend(),
+        cv.Optional(CONF_ERROR_E2): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_EMPTY).extend(),
+        cv.Optional(CONF_ERROR_EA1): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_EMPTY).extend(),
+        cv.Optional(CONF_ERROR_EA2): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_EMPTY).extend(),
+        cv.Optional(CONF_ERROR_EA3): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_EMPTY).extend(),
+        cv.Optional(CONF_ERROR_EA4): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_EMPTY).extend(),
+        cv.Optional(CONF_ERROR_EA5): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_EMPTY).extend(),
+        cv.Optional(CONF_ERROR_EA6): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_EMPTY).extend(),
+        cv.Optional(CONF_ERROR_EA7): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_EMPTY).extend(),
+        cv.Optional(CONF_ERROR_EA8): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_EMPTY).extend(),
+        
+        # Digital input binary sensors
+        cv.Optional(CONF_INPUT_L1): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_EMPTY).extend(),
+        cv.Optional(CONF_INPUT_L2): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_EMPTY).extend(),
+        cv.Optional(CONF_INPUT_BATHROOM_SWITCH): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_EMPTY).extend(),
+        cv.Optional(CONF_INPUT_KITCHEN_HOOD_SWITCH): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_EMPTY).extend(),
+        cv.Optional(CONF_INPUT_EXTERNAL_FILTER): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_EMPTY).extend(),
+        cv.Optional(CONF_INPUT_WTW): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_EMPTY).extend(),
+        cv.Optional(CONF_INPUT_BATHROOM_SWITCH_2): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_EMPTY).extend(),
+        
+        # Analog input sensors  
+        cv.Optional(CONF_ANALOG_INPUT_1): sensor.sensor_schema(
+            device_class=DEVICE_CLASS_VOLTAGE,
+            unit_of_measurement=UNIT_VOLT,
+            accuracy_decimals=2,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ).extend(),
+        cv.Optional(CONF_ANALOG_INPUT_2): sensor.sensor_schema(
+            device_class=DEVICE_CLASS_VOLTAGE,
+            unit_of_measurement=UNIT_VOLT,
+            accuracy_decimals=2,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ).extend(),
+        cv.Optional(CONF_ANALOG_INPUT_3): sensor.sensor_schema(
+            device_class=DEVICE_CLASS_VOLTAGE,
+            unit_of_measurement=UNIT_VOLT,
+            accuracy_decimals=2,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ).extend(),
+        cv.Optional(CONF_ANALOG_INPUT_4): sensor.sensor_schema(
+            device_class=DEVICE_CLASS_VOLTAGE,
+            unit_of_measurement=UNIT_VOLT,
+            accuracy_decimals=2,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ).extend(),
+        
+        # Ventilation level number components
+        cv.Optional(CONF_SUPPLY_ABSENT_PERCENT): number.number_schema(
+            ComfoAirVentilationLevelNumber,
+            unit_of_measurement=UNIT_PERCENT,
+            device_class=DEVICE_CLASS_EMPTY,
+        ).extend(),
+        cv.Optional(CONF_SUPPLY_LOW_PERCENT): number.number_schema(
+            ComfoAirVentilationLevelNumber,
+            unit_of_measurement=UNIT_PERCENT,
+            device_class=DEVICE_CLASS_EMPTY,
+        ).extend(),
+        cv.Optional(CONF_SUPPLY_MEDIUM_PERCENT): number.number_schema(
+            ComfoAirVentilationLevelNumber,
+            unit_of_measurement=UNIT_PERCENT,
+            device_class=DEVICE_CLASS_EMPTY,
+        ).extend(),
+        cv.Optional(CONF_SUPPLY_HIGH_PERCENT): number.number_schema(
+            ComfoAirVentilationLevelNumber,
+            unit_of_measurement=UNIT_PERCENT,
+            device_class=DEVICE_CLASS_EMPTY,
+        ).extend(),
+        cv.Optional(CONF_EXHAUST_ABSENT_PERCENT): number.number_schema(
+            ComfoAirVentilationLevelNumber,
+            unit_of_measurement=UNIT_PERCENT,
+            device_class=DEVICE_CLASS_EMPTY,
+        ).extend(),
+        cv.Optional(CONF_EXHAUST_LOW_PERCENT): number.number_schema(
+            ComfoAirVentilationLevelNumber,
+            unit_of_measurement=UNIT_PERCENT,
+            device_class=DEVICE_CLASS_EMPTY,
+        ).extend(),
+        cv.Optional(CONF_EXHAUST_MEDIUM_PERCENT): number.number_schema(
+            ComfoAirVentilationLevelNumber,
+            unit_of_measurement=UNIT_PERCENT,
+            device_class=DEVICE_CLASS_EMPTY,
+        ).extend(),
+        cv.Optional(CONF_EXHAUST_HIGH_PERCENT): number.number_schema(
+            ComfoAirVentilationLevelNumber,
+            unit_of_measurement=UNIT_PERCENT,
+            device_class=DEVICE_CLASS_EMPTY,
+        ).extend(),
+        
+        # Time delay number components
+        cv.Optional(CONF_BATHROOM_SWITCH_ON_DELAY_MINUTES_NUMBER): number.number_schema(
+            ComfoAirTimeDelayNumber,
+            unit_of_measurement=UNIT_MINUTE,
+            device_class=DEVICE_CLASS_EMPTY,
+        ).extend(),
+        cv.Optional(CONF_BATHROOM_SWITCH_OFF_DELAY_MINUTES_NUMBER): number.number_schema(
+            ComfoAirTimeDelayNumber,
+            unit_of_measurement=UNIT_MINUTE,
+            device_class=DEVICE_CLASS_EMPTY,
+        ).extend(),
+        cv.Optional(CONF_L1_SWITCH_OFF_DELAY_MINUTES_NUMBER): number.number_schema(
+            ComfoAirTimeDelayNumber,
+            unit_of_measurement=UNIT_MINUTE,
+            device_class=DEVICE_CLASS_EMPTY,
+        ).extend(),
+        cv.Optional(CONF_BOOST_VENTILATION_MINUTES_NUMBER): number.number_schema(
+            ComfoAirTimeDelayNumber,
+            unit_of_measurement=UNIT_MINUTE,
+            device_class=DEVICE_CLASS_EMPTY,
+        ).extend(),
+        cv.Optional(CONF_FILTER_WARNING_WEEKS_NUMBER): number.number_schema(
+            ComfoAirTimeDelayNumber,
+            unit_of_measurement=UNIT_WEEK,
+            device_class=DEVICE_CLASS_EMPTY,
+        ).extend(),
+        cv.Optional(CONF_RF_HIGH_TIME_SHORT_MINUTES_NUMBER): number.number_schema(
+            ComfoAirTimeDelayNumber,
+            unit_of_measurement=UNIT_MINUTE,
+            device_class=DEVICE_CLASS_EMPTY,
+        ).extend(),
+        cv.Optional(CONF_RF_HIGH_TIME_LONG_MINUTES_NUMBER): number.number_schema(
+            ComfoAirTimeDelayNumber,
+            unit_of_measurement=UNIT_MINUTE,
+            device_class=DEVICE_CLASS_EMPTY,
+        ).extend(),
+        cv.Optional(CONF_EXTRACTOR_HOOD_SWITCH_OFF_DELAY_MINUTES_NUMBER): number.number_schema(
+            ComfoAirTimeDelayNumber,
+            unit_of_measurement=UNIT_MINUTE,
+            device_class=DEVICE_CLASS_EMPTY,
+        ).extend(),
     }
 )
 
@@ -541,7 +814,52 @@ def to_code(config):
     cg.add(var.set_name(config[REQUIRED_KEY_NAME]))
     paren = yield cg.get_variable(config[CONF_UART_ID])
     cg.add(var.set_uart_component(paren))
+    
+    # Handle ventilation level number components with parent and index
+    ventilation_numbers = [
+        (CONF_SUPPLY_ABSENT_PERCENT, 0),
+        (CONF_SUPPLY_LOW_PERCENT, 1),
+        (CONF_SUPPLY_MEDIUM_PERCENT, 2),
+        (CONF_SUPPLY_HIGH_PERCENT, 3),
+        (CONF_EXHAUST_ABSENT_PERCENT, 4),
+        (CONF_EXHAUST_LOW_PERCENT, 5),
+        (CONF_EXHAUST_MEDIUM_PERCENT, 6),
+        (CONF_EXHAUST_HIGH_PERCENT, 7),
+    ]
+    
+    for conf_key, level_index in ventilation_numbers:
+        if conf_key in config:
+            sens = yield number.new_number(config[conf_key])
+            cg.add(sens.set_parent(var))
+            cg.add(sens.set_level_index(level_index))
+            func = getattr(var, "set_" + conf_key)
+            cg.add(func(sens))
+    
+    # Handle time delay number components with parent and index
+    time_delay_numbers = [
+        (CONF_BATHROOM_SWITCH_ON_DELAY_MINUTES_NUMBER, 0),
+        (CONF_BATHROOM_SWITCH_OFF_DELAY_MINUTES_NUMBER, 1),
+        (CONF_L1_SWITCH_OFF_DELAY_MINUTES_NUMBER, 2),
+        (CONF_BOOST_VENTILATION_MINUTES_NUMBER, 3),
+        (CONF_FILTER_WARNING_WEEKS_NUMBER, 4),
+        (CONF_RF_HIGH_TIME_SHORT_MINUTES_NUMBER, 5),
+        (CONF_RF_HIGH_TIME_LONG_MINUTES_NUMBER, 6),
+        (CONF_EXTRACTOR_HOOD_SWITCH_OFF_DELAY_MINUTES_NUMBER, 7),
+    ]
+    
+    for conf_key, delay_index in time_delay_numbers:
+        if conf_key in config:
+            sens = yield number.new_number(config[conf_key])
+            cg.add(sens.set_parent(var))
+            cg.add(sens.set_delay_index(delay_index))
+            func = getattr(var, "set_" + conf_key)
+            cg.add(func(sens))
+    
+    # Handle all other components (sensors, binary_sensors, text_sensors, select)
     for k, values in helper_comfoair.items():
+        if k == "number":
+            # Already handled above
+            continue
         for v in values:
             if not v in config:
                 continue

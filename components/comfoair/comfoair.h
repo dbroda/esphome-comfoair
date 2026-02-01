@@ -8,6 +8,7 @@
 #include "esphome/components/climate/climate_traits.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/select/select.h"
+#include "esphome/components/number/number.h"
 #include "esphome/components/text_sensor/text_sensor.h"
 #include "registers.h"
 
@@ -32,9 +33,39 @@ namespace esphome
       ComfoAirComponent *parent_{nullptr};
     };
 
+    class ComfoAirVentilationLevelNumber : public number::Number
+    {
+    public:
+      void set_parent(ComfoAirComponent *parent) { this->parent_ = parent; }
+      void set_level_index(uint8_t index) { this->level_index_ = index; }
+
+    protected:
+      void control(float value) override;
+
+    private:
+      ComfoAirComponent *parent_{nullptr};
+      uint8_t level_index_{0};
+    };
+
+    class ComfoAirTimeDelayNumber : public number::Number
+    {
+    public:
+      void set_parent(ComfoAirComponent *parent) { this->parent_ = parent; }
+      void set_delay_index(uint8_t index) { this->delay_index_ = index; }
+
+    protected:
+      void control(float value) override;
+
+    private:
+      ComfoAirComponent *parent_{nullptr};
+      uint8_t delay_index_{0};
+    };
+
     class ComfoAirComponent : public climate::Climate, public PollingComponent, public uart::UARTDevice
     {
       friend class ComfoAirSizeSelect;
+      friend class ComfoAirVentilationLevelNumber;
+      friend class ComfoAirTimeDelayNumber;
 
     public:
       // Poll every 600ms
@@ -175,6 +206,12 @@ namespace esphome
         case 9:
           get_time_delay_();
           break;
+        case 10:
+          get_inputs_();
+          break;
+        case 11:
+          get_analog_inputs_();
+          break;
         }
 
         update_counter_++;
@@ -265,6 +302,76 @@ namespace esphome
           uint8_t command[1] = {(uint8_t)((temperature + 20.0f) * 2.0f)};
           write_command_(CMD_SET_COMFORT_TEMPERATURE, command, sizeof(command));
         }
+      }
+      
+      bool set_ventilation_level_percent(uint8_t level_index, uint8_t percent)
+      {
+        if (percent > 100)
+        {
+          ESP_LOGW(TAG, "Ignoring invalid ventilation percent: %u", percent);
+          return false;
+        }
+        
+        if (!ventilation_levels_valid_)
+        {
+          ESP_LOGW(TAG, "Ventilation levels cannot be changed before initial read");
+          return false;
+        }
+        
+        if (level_index > 7)
+        {
+          ESP_LOGW(TAG, "Invalid ventilation level index: %u", level_index);
+          return false;
+        }
+        
+        // Update cache
+        ventilation_levels_[level_index] = percent;
+        
+        // Send command with all 8 levels (protocol requires all values)
+        uint8_t command[9];
+        // Order: exhaust absent, low, med, high, supply absent, low, med, high, unused byte
+        command[0] = ventilation_levels_[4]; // exhaust absent
+        command[1] = ventilation_levels_[5]; // exhaust low
+        command[2] = ventilation_levels_[6]; // exhaust medium
+        command[3] = ventilation_levels_[0]; // supply absent
+        command[4] = ventilation_levels_[1]; // supply low
+        command[5] = ventilation_levels_[2]; // supply medium
+        command[6] = ventilation_levels_[7]; // exhaust high
+        command[7] = ventilation_levels_[3]; // supply high
+        command[8] = 0x00;
+        
+        ESP_LOGI(TAG, "Setting ventilation level %u to %u%%", level_index, percent);
+        write_command_(CMD_SET_VENTILATION_LEVEL, command, sizeof(command));
+        return true;
+      }
+      
+      bool set_time_delay(uint8_t delay_index, uint8_t value)
+      {
+        if (!time_delays_valid_)
+        {
+          ESP_LOGW(TAG, "Time delays cannot be changed before initial read");
+          return false;
+        }
+        
+        if (delay_index > 7)
+        {
+          ESP_LOGW(TAG, "Invalid time delay index: %u", delay_index);
+          return false;
+        }
+        
+        // Update cache
+        time_delays_[delay_index] = value;
+        
+        // Send command with all 8 values (protocol requires all values)
+        uint8_t command[8];
+        for (int i = 0; i < 8; i++)
+        {
+          command[i] = time_delays_[i];
+        }
+        
+        ESP_LOGI(TAG, "Setting time delay %u to %u", delay_index, value);
+        write_command_(CMD_SET_TIME_DELAY, command, sizeof(command));
+        return true;
       }
 
       void write_command_(const uint8_t command, const uint8_t *command_data, uint8_t command_data_length)
@@ -513,6 +620,38 @@ namespace esphome
         {
 
           ESP_LOGD(TAG, "Level %02x", msg[8]);
+          
+          // Cache ventilation levels for write operations
+          // msg[0] = exhaust absent, msg[1] = exhaust low, msg[2] = exhaust medium
+          // msg[3] = supply absent, msg[4] = supply low, msg[5] = supply medium
+          // msg[10] = exhaust high, msg[11] = supply high
+          ventilation_levels_[0] = msg[3]; // supply absent
+          ventilation_levels_[1] = msg[4]; // supply low
+          ventilation_levels_[2] = msg[5]; // supply medium
+          ventilation_levels_[3] = msg[11]; // supply high
+          ventilation_levels_[4] = msg[0]; // exhaust absent
+          ventilation_levels_[5] = msg[1]; // exhaust low
+          ventilation_levels_[6] = msg[2]; // exhaust medium
+          ventilation_levels_[7] = msg[10]; // exhaust high
+          ventilation_levels_valid_ = true;
+          
+          // Publish to number components
+          if (supply_absent_percent != nullptr)
+            supply_absent_percent->publish_state(msg[3]);
+          if (supply_low_percent != nullptr)
+            supply_low_percent->publish_state(msg[4]);
+          if (supply_medium_percent != nullptr)
+            supply_medium_percent->publish_state(msg[5]);
+          if (supply_high_percent != nullptr)
+            supply_high_percent->publish_state(msg[11]);
+          if (exhaust_absent_percent != nullptr)
+            exhaust_absent_percent->publish_state(msg[0]);
+          if (exhaust_low_percent != nullptr)
+            exhaust_low_percent->publish_state(msg[1]);
+          if (exhaust_medium_percent != nullptr)
+            exhaust_medium_percent->publish_state(msg[2]);
+          if (exhaust_high_percent != nullptr)
+            exhaust_high_percent->publish_state(msg[10]);
 
           if (return_air_level != nullptr)
           {
@@ -569,6 +708,41 @@ namespace esphome
             uint8_t status = msg[8];
             filter_status->publish_state(status == 0 ? "Ok" : (status == 1 ? "Full" : "Unknown"));
           }
+          
+          // Parse error codes according to protocol spec (CMD_GET_FAULTS response)
+          // Byte[0] = Current error A (bits 0-7 = A1-A8)
+          if (error_a1 != nullptr) error_a1->publish_state(msg[0] & 0x01);
+          if (error_a2 != nullptr) error_a2->publish_state(msg[0] & 0x02);
+          if (error_a3 != nullptr) error_a3->publish_state(msg[0] & 0x04);
+          if (error_a4 != nullptr) error_a4->publish_state(msg[0] & 0x08);
+          if (error_a5 != nullptr) error_a5->publish_state(msg[0] & 0x10);
+          if (error_a6 != nullptr) error_a6->publish_state(msg[0] & 0x20);
+          if (error_a7 != nullptr) error_a7->publish_state(msg[0] & 0x40);
+          if (error_a8 != nullptr) error_a8->publish_state(msg[0] & 0x80);
+          
+          // Byte[1] = Current error E (bits 0-7 = E1-E8, but only E1-E2 defined)
+          if (error_e1 != nullptr) error_e1->publish_state(msg[1] & 0x01);
+          if (error_e2 != nullptr) error_e2->publish_state(msg[1] & 0x02);
+          
+          // Byte[9] = Current error EA (bits 0-7 = EA1-EA8)
+          if (error_ea1 != nullptr) error_ea1->publish_state(msg[9] & 0x01);
+          if (error_ea2 != nullptr) error_ea2->publish_state(msg[9] & 0x02);
+          if (error_ea3 != nullptr) error_ea3->publish_state(msg[9] & 0x04);
+          if (error_ea4 != nullptr) error_ea4->publish_state(msg[9] & 0x08);
+          if (error_ea5 != nullptr) error_ea5->publish_state(msg[9] & 0x10);
+          if (error_ea6 != nullptr) error_ea6->publish_state(msg[9] & 0x20);
+          if (error_ea7 != nullptr) error_ea7->publish_state(msg[9] & 0x40);
+          if (error_ea8 != nullptr) error_ea8->publish_state(msg[9] & 0x80);
+          
+          // Byte[13] = Current error A (high) (bits 0-6 = A9-A15, bit 7 = A0)
+          if (error_a9 != nullptr) error_a9->publish_state(msg[13] & 0x01);
+          if (error_a10 != nullptr) error_a10->publish_state(msg[13] & 0x02);
+          if (error_a11 != nullptr) error_a11->publish_state(msg[13] & 0x04);
+          if (error_a12 != nullptr) error_a12->publish_state(msg[13] & 0x08);
+          if (error_a13 != nullptr) error_a13->publish_state(msg[13] & 0x10);
+          if (error_a14 != nullptr) error_a14->publish_state(msg[13] & 0x20);
+          if (error_a15 != nullptr) error_a15->publish_state(msg[13] & 0x40);
+          
           break;
         }
         case RES_GET_TEMPERATURES:
@@ -891,6 +1065,14 @@ namespace esphome
         }
         case RES_GET_TIME_DELAY:
         {
+          // Cache all time delay values
+          for (int i = 0; i < 8; i++)
+          {
+            time_delays_[i] = msg[i];
+          }
+          time_delays_valid_ = true;
+          
+          // Publish to read-only sensors (existing)
           if (bathroom_switch_on_delay_minutes != nullptr)
           {
             bathroom_switch_on_delay_minutes->publish_state(msg[0]);
@@ -930,7 +1112,91 @@ namespace esphome
           {
             extractor_hood_switch_off_delay_minutes->publish_state(msg[7]);
           }
+          
+          // Publish to writable number components (new)
+          if (bathroom_switch_on_delay_minutes_number != nullptr)
+          {
+            bathroom_switch_on_delay_minutes_number->publish_state(msg[0]);
+          }
 
+          if (bathroom_switch_off_delay_minutes_number != nullptr)
+          {
+            bathroom_switch_off_delay_minutes_number->publish_state(msg[1]);
+          }
+
+          if (l1_switch_off_delay_minutes_number != nullptr)
+          {
+            l1_switch_off_delay_minutes_number->publish_state(msg[2]);
+          }
+
+          if (boost_ventilation_minutes_number != nullptr)
+          {
+            boost_ventilation_minutes_number->publish_state(msg[3]);
+          }
+
+          if (filter_warning_weeks_number != nullptr)
+          {
+            filter_warning_weeks_number->publish_state(msg[4]);
+          }
+
+          if (rf_high_time_short_minutes_number != nullptr)
+          {
+            rf_high_time_short_minutes_number->publish_state(msg[5]);
+          }
+
+          if (rf_high_time_long_minutes_number != nullptr)
+          {
+            rf_high_time_long_minutes_number->publish_state(msg[6]);
+          }
+
+          if (extractor_hood_switch_off_delay_minutes_number != nullptr)
+          {
+            extractor_hood_switch_off_delay_minutes_number->publish_state(msg[7]);
+          }
+
+          break;
+        }
+        case RES_GET_INPUTS:
+        {
+          // Byte[0] = Step switch (1 = active / 0 = inactive)
+          //   0x01 = L1, 0x02 = L2
+          if (input_l1 != nullptr)
+            input_l1->publish_state(msg[0] & 0x01);
+          if (input_l2 != nullptr)
+            input_l2->publish_state(msg[0] & 0x02);
+          
+          // Byte[1] = Switching inputs (1 = active / 0 = inactive)
+          //   0x01 = bathroom switch
+          //   0x02 = kitchen hood switch
+          //   0x04 = External filter
+          //   0x08 = heat recovery (WTW)
+          //   0x10 = bathroom switch 2 (luxe)
+          if (input_bathroom_switch != nullptr)
+            input_bathroom_switch->publish_state(msg[1] & 0x01);
+          if (input_kitchen_hood_switch != nullptr)
+            input_kitchen_hood_switch->publish_state(msg[1] & 0x02);
+          if (input_external_filter != nullptr)
+            input_external_filter->publish_state(msg[1] & 0x04);
+          if (input_wtw != nullptr)
+            input_wtw->publish_state(msg[1] & 0x08);
+          if (input_bathroom_switch_2 != nullptr)
+            input_bathroom_switch_2->publish_state(msg[1] & 0x10);
+          
+          break;
+        }
+        case RES_GET_ANALOG_INPUTS:
+        {
+          // Byte[0-3] = Analog 1-4 (0..255 = 0..10V)
+          // Convert to volts: value / 25.5
+          if (analog_input_1 != nullptr)
+            analog_input_1->publish_state(msg[0] / 25.5f);
+          if (analog_input_2 != nullptr)
+            analog_input_2->publish_state(msg[1] / 25.5f);
+          if (analog_input_3 != nullptr)
+            analog_input_3->publish_state(msg[2] / 25.5f);
+          if (analog_input_4 != nullptr)
+            analog_input_4->publish_state(msg[3] / 25.5f);
+          
           break;
         }
         }
@@ -1030,6 +1296,33 @@ namespace esphome
         ESP_LOGD(TAG, "getting time delay");
         write_command_(CMD_GET_TIME_DELAY, nullptr, 0);
       }
+      
+      void get_inputs_()
+      {
+        if (input_l1 != nullptr ||
+            input_l2 != nullptr ||
+            input_bathroom_switch != nullptr ||
+            input_kitchen_hood_switch != nullptr ||
+            input_external_filter != nullptr ||
+            input_wtw != nullptr ||
+            input_bathroom_switch_2 != nullptr)
+        {
+          ESP_LOGD(TAG, "getting inputs");
+          write_command_(CMD_GET_INPUTS, nullptr, 0);
+        }
+      }
+      
+      void get_analog_inputs_()
+      {
+        if (analog_input_1 != nullptr ||
+            analog_input_2 != nullptr ||
+            analog_input_3 != nullptr ||
+            analog_input_4 != nullptr)
+        {
+          ESP_LOGD(TAG, "getting analog inputs");
+          write_command_(CMD_GET_ANALOG_INPUTS, nullptr, 0);
+        }
+      }
 
       uint8_t get_uint8_t_(uint8_t start_index) const
       {
@@ -1048,11 +1341,19 @@ namespace esphome
       uint8_t data_[30];
       uint8_t data_index_{0};
       int8_t update_counter_{-4};
-      const int8_t num_update_counter_elements_{9};
+      const int8_t num_update_counter_elements_{11};
       uint8_t status_payload_[8]{0};
       bool status_payload_valid_{false};
       uint8_t current_unit_size_{0};
       ComfoAirSizeSelect *size_select_{nullptr};
+      
+      // Ventilation level cache (8 values: exhaust absent/low/med/high, supply absent/low/med/high)
+      uint8_t ventilation_levels_[8]{0, 0, 0, 0, 0, 0, 0, 0};
+      bool ventilation_levels_valid_{false};
+      
+      // Time delay cache (8 values according to CMD_GET_TIME_DELAY)
+      uint8_t time_delays_[8]{0, 0, 0, 0, 0, 0, 0, 0};
+      bool time_delays_valid_{false};
 
       uint8_t bootloader_version_[13]{0};
       uint8_t firmware_version_[13]{0};
@@ -1135,6 +1436,68 @@ namespace esphome
       sensor::Sensor *rf_high_time_short_minutes{nullptr};
       sensor::Sensor *rf_high_time_long_minutes{nullptr};
       sensor::Sensor *extractor_hood_switch_off_delay_minutes{nullptr};
+
+      // Error code binary sensors
+      binary_sensor::BinarySensor *error_a1{nullptr};
+      binary_sensor::BinarySensor *error_a2{nullptr};
+      binary_sensor::BinarySensor *error_a3{nullptr};
+      binary_sensor::BinarySensor *error_a4{nullptr};
+      binary_sensor::BinarySensor *error_a5{nullptr};
+      binary_sensor::BinarySensor *error_a6{nullptr};
+      binary_sensor::BinarySensor *error_a7{nullptr};
+      binary_sensor::BinarySensor *error_a8{nullptr};
+      binary_sensor::BinarySensor *error_a9{nullptr};
+      binary_sensor::BinarySensor *error_a10{nullptr};
+      binary_sensor::BinarySensor *error_a11{nullptr};
+      binary_sensor::BinarySensor *error_a12{nullptr};
+      binary_sensor::BinarySensor *error_a13{nullptr};
+      binary_sensor::BinarySensor *error_a14{nullptr};
+      binary_sensor::BinarySensor *error_a15{nullptr};
+      binary_sensor::BinarySensor *error_e1{nullptr};
+      binary_sensor::BinarySensor *error_e2{nullptr};
+      binary_sensor::BinarySensor *error_ea1{nullptr};
+      binary_sensor::BinarySensor *error_ea2{nullptr};
+      binary_sensor::BinarySensor *error_ea3{nullptr};
+      binary_sensor::BinarySensor *error_ea4{nullptr};
+      binary_sensor::BinarySensor *error_ea5{nullptr};
+      binary_sensor::BinarySensor *error_ea6{nullptr};
+      binary_sensor::BinarySensor *error_ea7{nullptr};
+      binary_sensor::BinarySensor *error_ea8{nullptr};
+      
+      // Ventilation level number components
+      number::Number *supply_absent_percent{nullptr};
+      number::Number *supply_low_percent{nullptr};
+      number::Number *supply_medium_percent{nullptr};
+      number::Number *supply_high_percent{nullptr};
+      number::Number *exhaust_absent_percent{nullptr};
+      number::Number *exhaust_low_percent{nullptr};
+      number::Number *exhaust_medium_percent{nullptr};
+      number::Number *exhaust_high_percent{nullptr};
+      
+      // Time delay number components (writable)
+      number::Number *bathroom_switch_on_delay_minutes_number{nullptr};
+      number::Number *bathroom_switch_off_delay_minutes_number{nullptr};
+      number::Number *l1_switch_off_delay_minutes_number{nullptr};
+      number::Number *boost_ventilation_minutes_number{nullptr};
+      number::Number *filter_warning_weeks_number{nullptr};
+      number::Number *rf_high_time_short_minutes_number{nullptr};
+      number::Number *rf_high_time_long_minutes_number{nullptr};
+      number::Number *extractor_hood_switch_off_delay_minutes_number{nullptr};
+      
+      // Digital input binary sensors
+      binary_sensor::BinarySensor *input_l1{nullptr};
+      binary_sensor::BinarySensor *input_l2{nullptr};
+      binary_sensor::BinarySensor *input_bathroom_switch{nullptr};
+      binary_sensor::BinarySensor *input_kitchen_hood_switch{nullptr};
+      binary_sensor::BinarySensor *input_external_filter{nullptr};
+      binary_sensor::BinarySensor *input_wtw{nullptr};
+      binary_sensor::BinarySensor *input_bathroom_switch_2{nullptr};
+      
+      // Analog input sensors (voltage)
+      sensor::Sensor *analog_input_1{nullptr};
+      sensor::Sensor *analog_input_2{nullptr};
+      sensor::Sensor *analog_input_3{nullptr};
+      sensor::Sensor *analog_input_4{nullptr};
 
       void set_type(text_sensor::TextSensor *type) { this->type = type; };
       void set_size(text_sensor::TextSensor *size) { this->size = size; };
@@ -1219,6 +1582,63 @@ namespace esphome
       void set_rf_high_time_short_minutes(sensor::Sensor *rf_high_time_short_minutes) { this->rf_high_time_short_minutes = rf_high_time_short_minutes; };
       void set_rf_high_time_long_minutes(sensor::Sensor *rf_high_time_long_minutes) { this->rf_high_time_long_minutes = rf_high_time_long_minutes; };
       void set_extractor_hood_switch_off_delay_minutes(sensor::Sensor *extractor_hood_switch_off_delay_minutes) { this->extractor_hood_switch_off_delay_minutes = extractor_hood_switch_off_delay_minutes; };
+
+      void set_error_a1(binary_sensor::BinarySensor *error_a1) { this->error_a1 = error_a1; };
+      void set_error_a2(binary_sensor::BinarySensor *error_a2) { this->error_a2 = error_a2; };
+      void set_error_a3(binary_sensor::BinarySensor *error_a3) { this->error_a3 = error_a3; };
+      void set_error_a4(binary_sensor::BinarySensor *error_a4) { this->error_a4 = error_a4; };
+      void set_error_a5(binary_sensor::BinarySensor *error_a5) { this->error_a5 = error_a5; };
+      void set_error_a6(binary_sensor::BinarySensor *error_a6) { this->error_a6 = error_a6; };
+      void set_error_a7(binary_sensor::BinarySensor *error_a7) { this->error_a7 = error_a7; };
+      void set_error_a8(binary_sensor::BinarySensor *error_a8) { this->error_a8 = error_a8; };
+      void set_error_a9(binary_sensor::BinarySensor *error_a9) { this->error_a9 = error_a9; };
+      void set_error_a10(binary_sensor::BinarySensor *error_a10) { this->error_a10 = error_a10; };
+      void set_error_a11(binary_sensor::BinarySensor *error_a11) { this->error_a11 = error_a11; };
+      void set_error_a12(binary_sensor::BinarySensor *error_a12) { this->error_a12 = error_a12; };
+      void set_error_a13(binary_sensor::BinarySensor *error_a13) { this->error_a13 = error_a13; };
+      void set_error_a14(binary_sensor::BinarySensor *error_a14) { this->error_a14 = error_a14; };
+      void set_error_a15(binary_sensor::BinarySensor *error_a15) { this->error_a15 = error_a15; };
+      void set_error_e1(binary_sensor::BinarySensor *error_e1) { this->error_e1 = error_e1; };
+      void set_error_e2(binary_sensor::BinarySensor *error_e2) { this->error_e2 = error_e2; };
+      void set_error_ea1(binary_sensor::BinarySensor *error_ea1) { this->error_ea1 = error_ea1; };
+      void set_error_ea2(binary_sensor::BinarySensor *error_ea2) { this->error_ea2 = error_ea2; };
+      void set_error_ea3(binary_sensor::BinarySensor *error_ea3) { this->error_ea3 = error_ea3; };
+      void set_error_ea4(binary_sensor::BinarySensor *error_ea4) { this->error_ea4 = error_ea4; };
+      void set_error_ea5(binary_sensor::BinarySensor *error_ea5) { this->error_ea5 = error_ea5; };
+      void set_error_ea6(binary_sensor::BinarySensor *error_ea6) { this->error_ea6 = error_ea6; };
+      void set_error_ea7(binary_sensor::BinarySensor *error_ea7) { this->error_ea7 = error_ea7; };
+      void set_error_ea8(binary_sensor::BinarySensor *error_ea8) { this->error_ea8 = error_ea8; };
+      
+      void set_supply_absent_percent(number::Number *supply_absent_percent) { this->supply_absent_percent = supply_absent_percent; };
+      void set_supply_low_percent(number::Number *supply_low_percent) { this->supply_low_percent = supply_low_percent; };
+      void set_supply_medium_percent(number::Number *supply_medium_percent) { this->supply_medium_percent = supply_medium_percent; };
+      void set_supply_high_percent(number::Number *supply_high_percent) { this->supply_high_percent = supply_high_percent; };
+      void set_exhaust_absent_percent(number::Number *exhaust_absent_percent) { this->exhaust_absent_percent = exhaust_absent_percent; };
+      void set_exhaust_low_percent(number::Number *exhaust_low_percent) { this->exhaust_low_percent = exhaust_low_percent; };
+      void set_exhaust_medium_percent(number::Number *exhaust_medium_percent) { this->exhaust_medium_percent = exhaust_medium_percent; };
+      void set_exhaust_high_percent(number::Number *exhaust_high_percent) { this->exhaust_high_percent = exhaust_high_percent; };
+      
+      void set_bathroom_switch_on_delay_minutes_number(number::Number *bathroom_switch_on_delay_minutes_number) { this->bathroom_switch_on_delay_minutes_number = bathroom_switch_on_delay_minutes_number; };
+      void set_bathroom_switch_off_delay_minutes_number(number::Number *bathroom_switch_off_delay_minutes_number) { this->bathroom_switch_off_delay_minutes_number = bathroom_switch_off_delay_minutes_number; };
+      void set_l1_switch_off_delay_minutes_number(number::Number *l1_switch_off_delay_minutes_number) { this->l1_switch_off_delay_minutes_number = l1_switch_off_delay_minutes_number; };
+      void set_boost_ventilation_minutes_number(number::Number *boost_ventilation_minutes_number) { this->boost_ventilation_minutes_number = boost_ventilation_minutes_number; };
+      void set_filter_warning_weeks_number(number::Number *filter_warning_weeks_number) { this->filter_warning_weeks_number = filter_warning_weeks_number; };
+      void set_rf_high_time_short_minutes_number(number::Number *rf_high_time_short_minutes_number) { this->rf_high_time_short_minutes_number = rf_high_time_short_minutes_number; };
+      void set_rf_high_time_long_minutes_number(number::Number *rf_high_time_long_minutes_number) { this->rf_high_time_long_minutes_number = rf_high_time_long_minutes_number; };
+      void set_extractor_hood_switch_off_delay_minutes_number(number::Number *extractor_hood_switch_off_delay_minutes_number) { this->extractor_hood_switch_off_delay_minutes_number = extractor_hood_switch_off_delay_minutes_number; };
+      
+      void set_input_l1(binary_sensor::BinarySensor *input_l1) { this->input_l1 = input_l1; };
+      void set_input_l2(binary_sensor::BinarySensor *input_l2) { this->input_l2 = input_l2; };
+      void set_input_bathroom_switch(binary_sensor::BinarySensor *input_bathroom_switch) { this->input_bathroom_switch = input_bathroom_switch; };
+      void set_input_kitchen_hood_switch(binary_sensor::BinarySensor *input_kitchen_hood_switch) { this->input_kitchen_hood_switch = input_kitchen_hood_switch; };
+      void set_input_external_filter(binary_sensor::BinarySensor *input_external_filter) { this->input_external_filter = input_external_filter; };
+      void set_input_wtw(binary_sensor::BinarySensor *input_wtw) { this->input_wtw = input_wtw; };
+      void set_input_bathroom_switch_2(binary_sensor::BinarySensor *input_bathroom_switch_2) { this->input_bathroom_switch_2 = input_bathroom_switch_2; };
+      
+      void set_analog_input_1(sensor::Sensor *analog_input_1) { this->analog_input_1 = analog_input_1; };
+      void set_analog_input_2(sensor::Sensor *analog_input_2) { this->analog_input_2 = analog_input_2; };
+      void set_analog_input_3(sensor::Sensor *analog_input_3) { this->analog_input_3 = analog_input_3; };
+      void set_analog_input_4(sensor::Sensor *analog_input_4) { this->analog_input_4 = analog_input_4; };
     };
 
     inline const char *ComfoAirComponent::unit_size_text_label_(uint8_t raw_size) const
@@ -1349,6 +1769,38 @@ namespace esphome
         {
           this->publish_state(current_option);
         }
+      }
+    }
+
+    inline void ComfoAirVentilationLevelNumber::control(float value)
+    {
+      if (this->parent_ == nullptr)
+      {
+        ESP_LOGW(TAG, "Ventilation level number has no parent component configured");
+        return;
+      }
+      
+      uint8_t percent = static_cast<uint8_t>(value);
+      if (!this->parent_->set_ventilation_level_percent(this->level_index_, percent))
+      {
+        // Revert to current value if setting failed
+        this->publish_state(this->parent_->ventilation_levels_[this->level_index_]);
+      }
+    }
+
+    inline void ComfoAirTimeDelayNumber::control(float value)
+    {
+      if (this->parent_ == nullptr)
+      {
+        ESP_LOGW(TAG, "Time delay number has no parent component configured");
+        return;
+      }
+      
+      uint8_t delay_value = static_cast<uint8_t>(value);
+      if (!this->parent_->set_time_delay(this->delay_index_, delay_value))
+      {
+        // Revert to current value if setting failed
+        this->publish_state(this->parent_->time_delays_[this->delay_index_]);
       }
     }
 
