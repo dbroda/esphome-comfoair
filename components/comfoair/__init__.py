@@ -829,7 +829,12 @@ def to_code(config):
     
     for conf_key, level_index in ventilation_numbers:
         if conf_key in config:
-            sens = yield number.new_number(config[conf_key])
+            sens = yield number.new_number(
+                config[conf_key],
+                min_value=0.0,
+                max_value=100.0,
+                step=1.0
+            )
             cg.add(sens.set_parent(var))
             cg.add(sens.set_level_index(level_index))
             func = getattr(var, "set_" + conf_key)
@@ -849,7 +854,35 @@ def to_code(config):
     
     for conf_key, delay_index in time_delay_numbers:
         if conf_key in config:
-            sens = yield number.new_number(config[conf_key])
+            # Different ranges based on delay type
+            if delay_index in [0, 1, 2, 5, 7]:  # Minutes (0-60)
+                sens = yield number.new_number(
+                    config[conf_key],
+                    min_value=0.0,
+                    max_value=60.0,
+                    step=1.0
+                )
+            elif delay_index == 3:  # Boost (0-120 minutes)
+                sens = yield number.new_number(
+                    config[conf_key],
+                    min_value=0.0,
+                    max_value=120.0,
+                    step=1.0
+                )
+            elif delay_index == 4:  # Filter warning (1-52 weeks)
+                sens = yield number.new_number(
+                    config[conf_key],
+                    min_value=1.0,
+                    max_value=52.0,
+                    step=1.0
+                )
+            elif delay_index == 6:  # RF high time long (0-120 minutes)
+                sens = yield number.new_number(
+                    config[conf_key],
+                    min_value=0.0,
+                    max_value=120.0,
+                    step=1.0
+                )
             cg.add(sens.set_parent(var))
             cg.add(sens.set_delay_index(delay_index))
             func = getattr(var, "set_" + conf_key)
