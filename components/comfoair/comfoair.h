@@ -1989,6 +1989,23 @@ namespace esphome
       }
     }
 
+    inline const char *rs232_mode_to_string(uint8_t mode)
+    {
+      switch (mode)
+      {
+      case 0:
+        return "End";
+      case 1:
+        return "PC_Only";
+      case 3:
+        return "PC_Master";
+      case 4:
+        return "PC_Log_Mode";
+      default:
+        return nullptr;
+      }
+    }
+
     inline bool ComfoAirComponent::set_rs232_mode(uint8_t mode)
     {
       // Valid modes: 0 = End, 1 = PC_Only, 3 = PC_Master, 4 = PC_Log_Mode
@@ -2001,6 +2018,17 @@ namespace esphome
       uint8_t command[1] = {mode};
       ESP_LOGI(TAG, "Setting RS232 mode to %u", mode);
       write_command_(CMD_SET_RS232_MODE, command, sizeof(command));
+
+      // Update select entity to reflect the change
+      if (rs232_mode_select_ != nullptr)
+      {
+        const char *mode_name = rs232_mode_to_string(mode);
+        if (mode_name != nullptr)
+        {
+          rs232_mode_select_->publish_state(mode_name);
+          ESP_LOGD(TAG, "Updated RS232 mode select to: %s", mode_name);
+        }
+      }
 
       return true;
     }
