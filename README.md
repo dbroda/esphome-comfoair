@@ -179,6 +179,89 @@ The sensor defined here is a full list of sensors - if you remove a sensor from 
 
 > **Warning:** The `size_select` entity exposes the ComfoAir unit size (large/small) for installer configuration. Changing this setting should be done sparingly and only when you know the correct unit size for your installation.
 
+## Diagnostic Test Mode (Advanced)
+
+⚠️ **WARNING: FOR SERVICE TECHNICIANS AND ADVANCED DIAGNOSTICS ONLY**
+
+The component supports the ComfoAir diagnostic test mode for hardware testing and commissioning. Test mode provides direct manual control over fans, relays, and flaps.
+
+**IMPORTANT SAFETY NOTES:**
+- Test mode takes full control of the ventilation unit
+- DO NOT use during normal operation
+- Automatic exit on ESPHome restart/reboot
+- All test commands are blocked when test mode is not active
+
+### Test Mode Entities
+
+```yaml
+comfoair:
+  # ... other configuration ...
+  
+  # Test mode control
+  test_mode_switch:
+    name: "Test Mode"
+    disabled_by_default: true
+    entity_category: diagnostic
+  
+  # Manual fan speed control (0-100%)
+  test_supply_fan_number:
+    name: "Test: Supply Fan Speed"
+    disabled_by_default: true
+    entity_category: diagnostic
+  
+  test_exhaust_fan_number:
+    name: "Test: Exhaust Fan Speed"
+    disabled_by_default: true
+    entity_category: diagnostic
+  
+  # Relay/output control
+  test_preheating_relay_switch:
+    name: "Test: Preheating Relay"
+    disabled_by_default: true
+    entity_category: diagnostic
+  
+  test_preheating_triac_switch:
+    name: "Test: Preheating Triac"
+    disabled_by_default: true
+    entity_category: diagnostic
+  
+  test_kitchen_hood_switch:
+    name: "Test: Kitchen Hood"
+    disabled_by_default: true
+    entity_category: diagnostic
+  
+  test_error_led_switch:
+    name: "Test: Error LED"
+    disabled_by_default: true
+    entity_category: diagnostic
+  
+  test_filter_led_switch:
+    name: "Test: Filter LED"
+    disabled_by_default: true
+    entity_category: diagnostic
+  
+  # Flap positioning (Closed/Open/Stop)
+  test_bypass_flap_select:
+    name: "Test: Bypass Flap"
+    disabled_by_default: true
+    entity_category: diagnostic
+  
+  test_preheating_flap_select:
+    name: "Test: Preheating Flap"
+    disabled_by_default: true
+    entity_category: diagnostic
+```
+
+### Test Mode Usage
+
+1. **Enable test mode**: Turn on `test_mode_switch`
+2. **Control components**: Use fan speed numbers, relay switches, and flap selects
+3. **Disable test mode**: Turn off `test_mode_switch`
+
+The system automatically exits test mode on restart for safety.
+
+**Note**: EWT (Earth-to-Water heat exchanger) controls are not included as they are uncommon in residential installations.
+
 For visualization:
 Checkout https://github.com/wichers/lovelace-comfoair and follow the instructions.
 
