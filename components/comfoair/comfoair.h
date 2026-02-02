@@ -111,6 +111,18 @@ namespace esphome
       ComfoAirComponent *parent_{nullptr};
     };
 
+    class ComfoAirFanModeSelect : public select::Select
+    {
+    public:
+      void set_parent(ComfoAirComponent *parent) { this->parent_ = parent; }
+
+    protected:
+      void control(const std::string &value) override;
+
+    private:
+      ComfoAirComponent *parent_{nullptr};
+    };
+
     class ComfoAirComponent : public climate::Climate, public PollingComponent, public uart::UARTDevice
     {
       friend class ComfoAirSizeSelect;
@@ -120,6 +132,7 @@ namespace esphome
       friend class ComfoAirStartSelfTestButton;
       friend class ComfoAirPreheaterSwitch;
       friend class ComfoAirRS232ModeSelect;
+      friend class ComfoAirFanModeSelect;
 
     public:
       // Poll every 600ms
@@ -1571,6 +1584,17 @@ namespace esphome
       
       // Select entities
       select::Select *rs232_mode_select_{nullptr};
+      select::Select *fan_mode_select_{nullptr};
+      
+      // Default ventilation percentages for fan_mode control
+      static constexpr uint8_t DEFAULT_SUPPLY_ABSENT = 15;
+      static constexpr uint8_t DEFAULT_SUPPLY_LOW = 35;
+      static constexpr uint8_t DEFAULT_SUPPLY_MEDIUM = 50;
+      static constexpr uint8_t DEFAULT_SUPPLY_HIGH = 70;
+      static constexpr uint8_t DEFAULT_EXHAUST_ABSENT = 15;
+      static constexpr uint8_t DEFAULT_EXHAUST_LOW = 35;
+      static constexpr uint8_t DEFAULT_EXHAUST_MEDIUM = 50;
+      static constexpr uint8_t DEFAULT_EXHAUST_HIGH = 70;
 
       void set_type(text_sensor::TextSensor *type) { this->type = type; };
       void set_size(text_sensor::TextSensor *size) { this->size = size; };
@@ -1718,7 +1742,9 @@ namespace esphome
       void set_start_self_test(button::Button *start_self_test) { this->start_self_test_ = start_self_test; };
       void set_preheater_present_switch(switch_::Switch *preheater_present_switch) { this->preheater_present_switch_ = preheater_present_switch; };
       void set_rs232_mode_select(select::Select *rs232_mode_select) { this->rs232_mode_select_ = rs232_mode_select; };
+      void set_fan_mode_select(select::Select *fan_mode_select) { this->fan_mode_select_ = fan_mode_select; };
       bool set_rs232_mode(uint8_t mode);
+      bool set_fan_mode(const std::string &mode);
     };
 
     inline const char *ComfoAirComponent::unit_size_text_label_(uint8_t raw_size) const
@@ -2016,6 +2042,125 @@ namespace esphome
       }
 
       this->parent_->set_rs232_mode(mode);
+    }
+
+    inline bool ComfoAirComponent::set_fan_mode(const std::string &mode)
+    {
+      if (!ventilation_levels_valid_)
+      {
+        ESP_LOGW(TAG, "Fan mode cannot be changed before initial ventilation levels are received");
+        return false;
+      }
+
+      // Determine which fans should be enabled based on mode
+      bool enable_supply = false;
+      bool enable_exhaust = false;
+      
+      if (mode == "Both")
+      {
+        enable_supply = true;
+        enable_exhaust = true;
+      }
+      else if (mode == "Supply Only")
+      {
+        enable_supply = true;
+        enable_exhaust = false;
+      }
+      else if (mode == "Exhaust Only")
+      {
+        enable_supply = false;
+        enable_exhaust = true;
+      }
+      else if (mode == "Off")
+      {
+        enable_supply = false;
+        enable_exhaust = false;
+      }
+      else
+      {
+        ESP_LOGW(TAG, "Unknown fan mode: %s", mode.c_str());
+        return false;
+      }
+
+      ESP_LOGI(TAG, "Setting fan mode to: %s (Supply: %s, Exhaust: %s)", 
+               mode.c_str(),
+               enable_supply ? "ON" : "OFF",
+               enable_exhaust ? "ON" : "OFF");
+
+      // Set ventilation levels based on desired fan states - always use DEFAULT values
+      if (enable_supply)
+      {
+        ventilation_levels_[0] = DEFAULT_SUPPLY_ABSENT;
+        ventilation_levels_[1] = DEFAULT_SUPPLY_LOW;
+        ventilation_levels_[2] = DEFAULT_SUPPLY_MEDIUM;
+        ventilation_levels_[3] = DEFAULT_SUPPLY_HIGH;
+      }
+      else
+      {
+        // Disable supply fan - set all to absent level
+        ventilation_levels_[0] = DEFAULT_SUPPLY_ABSENT;
+        ventilation_levels_[1] = DEFAULT_SUPPLY_ABSENT;
+        ventilation_levels_[2] = DEFAULT_SUPPLY_ABSENT;
+        ventilation_levels_[3] = DEFAULT_SUPPLY_ABSENT;
+      }
+
+      if (enable_exhaust)
+      {
+        ventilation_levels_[4] = DEFAULT_EXHAUST_ABSENT;
+        ventilation_levels_[5] = DEFAULT_EXHAUST_LOW;
+        ventilation_levels_[6] = DEFAULT_EXHAUST_MEDIUM;
+        ventilation_levels_[7] = DEFAULT_EXHAUST_HIGH;
+      }
+      else
+      {
+        // Disable exhaust fan - set all to absent level
+        ventilation_levels_[4] = DEFAULT_EXHAUST_ABSENT;
+        ventilation_levels_[5] = DEFAULT_EXHAUST_ABSENT;
+        ventilation_levels_[6] = DEFAULT_EXHAUST_ABSENT;
+        ventilation_levels_[7] = DEFAULT_EXHAUST_ABSENT;
+      }
+
+      // Send command with all 8 levels (protocol requires all values)
+      uint8_t command[9];
+      command[0] = ventilation_levels_[4]; // exhaust absent
+      command[1] = ventilation_levels_[5]; // exhaust low
+      command[2] = ventilation_levels_[6]; // exhaust medium
+      command[3] = ventilation_levels_[0]; // supply absent
+      command[4] = ventilation_levels_[1]; // supply low
+      command[5] = ventilation_levels_[2]; // supply medium
+      command[6] = ventilation_levels_[7]; // exhaust high
+      command[7] = ventilation_levels_[3]; // supply high
+      command[8] = 0x00;
+
+      write_command_(CMD_SET_VENTILATION_LEVEL, command, sizeof(command));
+
+      // Update the select entity state
+      if (fan_mode_select_ != nullptr)
+      {
+        fan_mode_select_->publish_state(mode);
+      }
+
+      return true;
+    }
+
+    inline void ComfoAirFanModeSelect::control(const std::string &value)
+    {
+      if (this->parent_ == nullptr)
+      {
+        ESP_LOGW(TAG, "Fan mode select has no parent component configured");
+        return;
+      }
+
+      // Validate the option
+      auto index = this->index_of(value);
+      if (!index.has_value())
+      {
+        ESP_LOGW(TAG, "Fan mode select received invalid option: %s", value.c_str());
+        return;
+      }
+
+      // Forward to parent component
+      this->parent_->set_fan_mode(value);
     }
 
   } // namespace comfoair
