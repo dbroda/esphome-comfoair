@@ -2,7 +2,7 @@
 
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import binary_sensor, sensor, text_sensor, uart, climate, select, number, button
+from esphome.components import binary_sensor, sensor, text_sensor, uart, climate, select, number, button, switch
 from esphome.const import (CONF_ID, CONF_UART_ID, DEVICE_CLASS_CURRENT,
                            DEVICE_CLASS_EMPTY, DEVICE_CLASS_SPEED,
                            DEVICE_CLASS_TEMPERATURE, DEVICE_CLASS_VOLUME, DEVICE_CLASS_VOLTAGE,
@@ -17,9 +17,10 @@ ComfoAirVentilationLevelNumber = comfoair_ns.class_("ComfoAirVentilationLevelNum
 ComfoAirTimeDelayNumber = comfoair_ns.class_("ComfoAirTimeDelayNumber", number.Number)
 ComfoAirResetErrorsButton = comfoair_ns.class_("ComfoAirResetErrorsButton", button.Button)
 ComfoAirStartSelfTestButton = comfoair_ns.class_("ComfoAirStartSelfTestButton", button.Button)
+ComfoAirPreheaterSwitch = comfoair_ns.class_("ComfoAirPreheaterSwitch", switch.Switch)
 
 DEPENDENCIES = ["uart"]
-AUTO_LOAD = ["sensor", "climate", "binary_sensor", "text_sensor", "select", "number", "button"]
+AUTO_LOAD = ["sensor", "climate", "binary_sensor", "text_sensor", "select", "number", "button", "switch"]
 REQUIRED_KEY_NAME = "name"
 CONF_HUB_ID = "comfoair"
 
@@ -105,6 +106,7 @@ CONF_RF_HIGH_TIME_LONG_MINUTES = "rf_high_time_long_minutes"
 CONF_EXTRACTOR_HOOD_SWITCH_OFF_DELAY_MINUTES = "extractor_hood_switch_off_delay_minutes"
 
 # Error code binary sensors
+CONF_ERROR_A0 = "error_a0"
 CONF_ERROR_A1 = "error_a1"
 CONF_ERROR_A2 = "error_a2"
 CONF_ERROR_A3 = "error_a3"
@@ -169,6 +171,9 @@ CONF_ANALOG_INPUT_4 = "analog_input_4"
 # Button entities
 CONF_RESET_ERRORS = "reset_errors"
 CONF_START_SELF_TEST = "start_self_test"
+
+# Switch entities
+CONF_PREHEATER_PRESENT_SWITCH = "preheater_present_switch"
 
 helper_comfoair = {
     "sensor": [
@@ -253,6 +258,7 @@ helper_comfoair = {
         CONF_P97_ACTIVE,
         
         # Error codes
+        CONF_ERROR_A0,
         CONF_ERROR_A1,
         CONF_ERROR_A2,
         CONF_ERROR_A3,
@@ -322,6 +328,9 @@ helper_comfoair = {
     "button": [
         CONF_RESET_ERRORS,
         CONF_START_SELF_TEST,
+    ],
+    "switch": [
+        CONF_PREHEATER_PRESENT_SWITCH,
     ],
 }
 
@@ -658,6 +667,7 @@ comfoair_sensors_schemas = cv.Schema(
         ).extend(),
         
         # Error code binary sensors
+        cv.Optional(CONF_ERROR_A0): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_EMPTY).extend(),
         cv.Optional(CONF_ERROR_A1): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_EMPTY).extend(),
         cv.Optional(CONF_ERROR_A2): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_EMPTY).extend(),
         cv.Optional(CONF_ERROR_A3): binary_sensor.binary_sensor_schema(device_class=DEVICE_CLASS_EMPTY).extend(),
@@ -727,6 +737,11 @@ comfoair_sensors_schemas = cv.Schema(
         cv.Optional(CONF_START_SELF_TEST): button.button_schema(
             ComfoAirStartSelfTestButton,
             device_class=DEVICE_CLASS_RESTART,
+        ).extend(),
+        
+        # Switch entities
+        cv.Optional(CONF_PREHEATER_PRESENT_SWITCH): switch.switch_schema(
+            ComfoAirPreheaterSwitch,
         ).extend(),
         
         # Ventilation level number components
@@ -909,7 +924,7 @@ def to_code(config):
             func = getattr(var, "set_" + conf_key)
             cg.add(func(sens))
     
-    # Handle all other components (sensors, binary_sensors, text_sensors, select, buttons)
+    # Handle all other components (sensors, binary_sensors, text_sensors, select, buttons, switches)
     for k, values in helper_comfoair.items():
         if k == "number":
             # Already handled above
@@ -929,6 +944,10 @@ def to_code(config):
             elif k == "button":
                 sens = yield button.new_button(config[v])
                 # Buttons need parent set
+                cg.add(sens.set_parent(var))
+            elif k == "switch":
+                sens = yield switch.new_switch(config[v])
+                # Switches need parent set
                 cg.add(sens.set_parent(var))
             if sens is not None:
                 func = getattr(var, "set_" + v)

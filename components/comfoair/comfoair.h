@@ -10,6 +10,7 @@
 #include "esphome/components/select/select.h"
 #include "esphome/components/number/number.h"
 #include "esphome/components/button/button.h"
+#include "esphome/components/switch/switch.h"
 #include "esphome/components/text_sensor/text_sensor.h"
 #include "registers.h"
 
@@ -86,6 +87,18 @@ namespace esphome
       ComfoAirComponent *parent_{nullptr};
     };
 
+    class ComfoAirPreheaterSwitch : public switch_::Switch
+    {
+    public:
+      void set_parent(ComfoAirComponent *parent) { this->parent_ = parent; }
+
+    protected:
+      void write_state(bool state) override;
+
+    private:
+      ComfoAirComponent *parent_{nullptr};
+    };
+
     class ComfoAirComponent : public climate::Climate, public PollingComponent, public uart::UARTDevice
     {
       friend class ComfoAirSizeSelect;
@@ -93,6 +106,7 @@ namespace esphome
       friend class ComfoAirTimeDelayNumber;
       friend class ComfoAirResetErrorsButton;
       friend class ComfoAirStartSelfTestButton;
+      friend class ComfoAirPreheaterSwitch;
 
     public:
       // Poll every 600ms
@@ -299,6 +313,7 @@ namespace esphome
       void set_uart_component(uart::UARTComponent *parent) { set_uart_parent(parent); }
       bool set_unit_size(uint8_t raw_size);
       void set_size_select(ComfoAirSizeSelect *size_select);
+      bool set_preheater_present(bool present);
 
     protected:
       void set_level_(int level)
@@ -769,6 +784,7 @@ namespace esphome
           if (error_a13 != nullptr) error_a13->publish_state(msg[13] & 0x10);
           if (error_a14 != nullptr) error_a14->publish_state(msg[13] & 0x20);
           if (error_a15 != nullptr) error_a15->publish_state(msg[13] & 0x40);
+          if (error_a0 != nullptr) error_a0->publish_state(msg[13] & 0x80);
           
           break;
         }
@@ -823,6 +839,12 @@ namespace esphome
           if (preheating_present != nullptr)
           {
             preheating_present->publish_state(msg[0]);
+          }
+          
+          // Also update the writable switch entity
+          if (preheater_present_switch_ != nullptr)
+          {
+            preheater_present_switch_->publish_state(msg[0] != 0);
           }
 
           if (bypass_present != nullptr)
@@ -1465,6 +1487,7 @@ namespace esphome
       sensor::Sensor *extractor_hood_switch_off_delay_minutes{nullptr};
 
       // Error code binary sensors
+      binary_sensor::BinarySensor *error_a0{nullptr};
       binary_sensor::BinarySensor *error_a1{nullptr};
       binary_sensor::BinarySensor *error_a2{nullptr};
       binary_sensor::BinarySensor *error_a3{nullptr};
@@ -1529,6 +1552,9 @@ namespace esphome
       // Button entities
       button::Button *reset_errors_{nullptr};
       button::Button *start_self_test_{nullptr};
+      
+      // Switch entities
+      switch_::Switch *preheater_present_switch_{nullptr};
 
       void set_type(text_sensor::TextSensor *type) { this->type = type; };
       void set_size(text_sensor::TextSensor *size) { this->size = size; };
@@ -1614,6 +1640,7 @@ namespace esphome
       void set_rf_high_time_long_minutes(sensor::Sensor *rf_high_time_long_minutes) { this->rf_high_time_long_minutes = rf_high_time_long_minutes; };
       void set_extractor_hood_switch_off_delay_minutes(sensor::Sensor *extractor_hood_switch_off_delay_minutes) { this->extractor_hood_switch_off_delay_minutes = extractor_hood_switch_off_delay_minutes; };
 
+      void set_error_a0(binary_sensor::BinarySensor *error_a0) { this->error_a0 = error_a0; };
       void set_error_a1(binary_sensor::BinarySensor *error_a1) { this->error_a1 = error_a1; };
       void set_error_a2(binary_sensor::BinarySensor *error_a2) { this->error_a2 = error_a2; };
       void set_error_a3(binary_sensor::BinarySensor *error_a3) { this->error_a3 = error_a3; };
@@ -1673,6 +1700,7 @@ namespace esphome
       
       void set_reset_errors(button::Button *reset_errors) { this->reset_errors_ = reset_errors; };
       void set_start_self_test(button::Button *start_self_test) { this->start_self_test_ = start_self_test; };
+      void set_preheater_present_switch(switch_::Switch *preheater_present_switch) { this->preheater_present_switch_ = preheater_present_switch; };
     };
 
     inline const char *ComfoAirComponent::unit_size_text_label_(uint8_t raw_size) const
@@ -1862,6 +1890,59 @@ namespace esphome
       ESP_LOGI(TAG, "Starting ComfoAir self-test diagnostic mode");
       uint8_t test_cmd[4] = {0, 0, 1, 0}; // Start self-test (byte 2)
       this->parent_->write_command_(CMD_RESET_AND_SELF_TEST, test_cmd, sizeof(test_cmd));
+    }
+
+    inline bool ComfoAirComponent::set_preheater_present(bool present)
+    {
+      if (!status_payload_valid_)
+      {
+        ESP_LOGW(TAG, "Preheater presence cannot be changed before initial status is received");
+        if (preheater_present_switch_ != nullptr)
+        {
+          preheater_present_switch_->publish_state(status_payload_[0] != 0);
+        }
+        return false;
+      }
+
+      uint8_t target_value = present ? 1 : 0;
+      if (status_payload_[0] == target_value)
+      {
+        if (preheater_present_switch_ != nullptr)
+        {
+          preheater_present_switch_->publish_state(present);
+        }
+        return true;
+      }
+
+      uint8_t payload[sizeof(status_payload_)];
+      memcpy(payload, status_payload_, sizeof(status_payload_));
+      payload[0] = target_value;
+
+      ESP_LOGI(TAG, "Setting preheater present to %s", present ? "ON" : "OFF");
+      write_command_(CMD_SET_STATUS, payload, sizeof(payload));
+
+      status_payload_[0] = target_value;
+      if (preheater_present_switch_ != nullptr)
+      {
+        preheater_present_switch_->publish_state(present);
+      }
+
+      return true;
+    }
+
+    inline void ComfoAirPreheaterSwitch::write_state(bool state)
+    {
+      if (this->parent_ == nullptr)
+      {
+        ESP_LOGW(TAG, "Preheater present switch has no parent component configured");
+        return;
+      }
+
+      if (!this->parent_->set_preheater_present(state))
+      {
+        // Revert to current state if setting failed
+        this->publish_state(this->parent_->status_payload_[0] != 0);
+      }
     }
 
   } // namespace comfoair
