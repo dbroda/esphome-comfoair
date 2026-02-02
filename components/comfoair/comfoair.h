@@ -99,6 +99,18 @@ namespace esphome
       ComfoAirComponent *parent_{nullptr};
     };
 
+    class ComfoAirRS232ModeSelect : public select::Select
+    {
+    public:
+      void set_parent(ComfoAirComponent *parent) { this->parent_ = parent; }
+
+    protected:
+      void control(const std::string &value) override;
+
+    private:
+      ComfoAirComponent *parent_{nullptr};
+    };
+
     class ComfoAirComponent : public climate::Climate, public PollingComponent, public uart::UARTDevice
     {
       friend class ComfoAirSizeSelect;
@@ -107,6 +119,7 @@ namespace esphome
       friend class ComfoAirResetErrorsButton;
       friend class ComfoAirStartSelfTestButton;
       friend class ComfoAirPreheaterSwitch;
+      friend class ComfoAirRS232ModeSelect;
 
     public:
       // Poll every 600ms
@@ -1555,6 +1568,9 @@ namespace esphome
       
       // Switch entities
       switch_::Switch *preheater_present_switch_{nullptr};
+      
+      // Select entities
+      select::Select *rs232_mode_select_{nullptr};
 
       void set_type(text_sensor::TextSensor *type) { this->type = type; };
       void set_size(text_sensor::TextSensor *size) { this->size = size; };
@@ -1701,6 +1717,8 @@ namespace esphome
       void set_reset_errors(button::Button *reset_errors) { this->reset_errors_ = reset_errors; };
       void set_start_self_test(button::Button *start_self_test) { this->start_self_test_ = start_self_test; };
       void set_preheater_present_switch(switch_::Switch *preheater_present_switch) { this->preheater_present_switch_ = preheater_present_switch; };
+      void set_rs232_mode_select(select::Select *rs232_mode_select) { this->rs232_mode_select_ = rs232_mode_select; };
+      bool set_rs232_mode(uint8_t mode);
     };
 
     inline const char *ComfoAirComponent::unit_size_text_label_(uint8_t raw_size) const
@@ -1943,6 +1961,61 @@ namespace esphome
         // Revert to current state if setting failed
         this->publish_state(this->parent_->status_payload_[0] != 0);
       }
+    }
+
+    inline bool ComfoAirComponent::set_rs232_mode(uint8_t mode)
+    {
+      // Valid modes: 0 = End, 1 = PC_Only, 3 = PC_Master, 4 = PC_Log_Mode
+      if (mode != 0 && mode != 1 && mode != 3 && mode != 4)
+      {
+        ESP_LOGW(TAG, "Ignoring invalid RS232 mode request: %u", mode);
+        return false;
+      }
+
+      uint8_t command[1] = {mode};
+      ESP_LOGI(TAG, "Setting RS232 mode to %u", mode);
+      write_command_(CMD_SET_RS232_MODE, command, sizeof(command));
+
+      return true;
+    }
+
+    inline void ComfoAirRS232ModeSelect::control(const std::string &value)
+    {
+      if (this->parent_ == nullptr)
+      {
+        ESP_LOGW(TAG, "RS232 mode select has no parent component configured");
+        return;
+      }
+
+      auto index = this->index_of(value);
+      if (!index.has_value())
+      {
+        ESP_LOGW(TAG, "RS232 mode select received invalid option: %s", value.c_str());
+        return;
+      }
+
+      // Map index to protocol values: End=0, PC_Only=1, PC_Master=3, PC_Log_Mode=4
+      uint8_t mode = 0;
+      switch (index.value())
+      {
+      case 0: // End
+        mode = 0;
+        break;
+      case 1: // PC_Only
+        mode = 1;
+        break;
+      case 2: // PC_Master
+        mode = 3;
+        break;
+      case 3: // PC_Log_Mode
+        mode = 4;
+        break;
+      default:
+        ESP_LOGW(TAG, "RS232 mode select index %zu not supported", index.value());
+        return;
+      }
+
+      this->parent_->set_rs232_mode(mode);
     }
 
   } // namespace comfoair

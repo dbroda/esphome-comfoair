@@ -18,6 +18,8 @@ ComfoAirTimeDelayNumber = comfoair_ns.class_("ComfoAirTimeDelayNumber", number.N
 ComfoAirResetErrorsButton = comfoair_ns.class_("ComfoAirResetErrorsButton", button.Button)
 ComfoAirStartSelfTestButton = comfoair_ns.class_("ComfoAirStartSelfTestButton", button.Button)
 ComfoAirPreheaterSwitch = comfoair_ns.class_("ComfoAirPreheaterSwitch", switch.Switch)
+ComfoAirSizeSelect = comfoair_ns.class_("ComfoAirSizeSelect", select.Select)
+ComfoAirRS232ModeSelect = comfoair_ns.class_("ComfoAirRS232ModeSelect", select.Select)
 
 DEPENDENCIES = ["uart"]
 AUTO_LOAD = ["sensor", "climate", "binary_sensor", "text_sensor", "select", "number", "button", "switch"]
@@ -29,6 +31,7 @@ UNIT_WEEK = "weeks"
 CONF_TYPE = "type"
 CONF_SIZE = "size"
 CONF_SIZE_SELECT = "size_select"
+CONF_RS232_MODE_SELECT = "rs232_mode_select"
 CONF_INTAKE_FAN_SPEED = "intake_fan_speed"
 CONF_EXHAUST_FAN_SPEED = "exhaust_fan_speed"
 CONF_INTAKE_FAN_SPEED_RPM = "intake_fan_speed_rpm"
@@ -303,6 +306,7 @@ helper_comfoair = {
     ],
     "select": [
         CONF_SIZE_SELECT,
+        CONF_RS232_MODE_SELECT,
     ],
     "number": [
         # Ventilation levels
@@ -334,8 +338,6 @@ helper_comfoair = {
     ],
 }
 
-ComfoAirSizeSelect = comfoair_ns.class_("ComfoAirSizeSelect", select.Select)
-
 comfoair_sensors_schemas = cv.Schema(
     {
         cv.Optional(CONF_TYPE): text_sensor.text_sensor_schema(),
@@ -345,6 +347,9 @@ comfoair_sensors_schemas = cv.Schema(
         cv.Optional(CONF_PREHEATING_VALVE): text_sensor.text_sensor_schema(),
         cv.Optional(CONF_SIZE_SELECT, default={}): select.select_schema(
             ComfoAirSizeSelect
+        ).extend(),
+        cv.Optional(CONF_RS232_MODE_SELECT): select.select_schema(
+            ComfoAirRS232ModeSelect
         ).extend(),
 
         cv.Optional(CONF_INTAKE_FAN_SPEED): sensor.sensor_schema(
@@ -940,7 +945,12 @@ def to_code(config):
             elif k == "text_sensor":
                 sens = yield text_sensor.new_text_sensor(config[v])
             elif k == "select":
-                sens = yield select.new_select(config[v], options=["Large", "Small"])
+                if v == CONF_SIZE_SELECT:
+                    sens = yield select.new_select(config[v], options=["Large", "Small"])
+                elif v == CONF_RS232_MODE_SELECT:
+                    sens = yield select.new_select(config[v], options=["End", "PC_Only", "PC_Master", "PC_Log_Mode"])
+                else:
+                    sens = yield select.new_select(config[v], options=[])
             elif k == "button":
                 sens = yield button.new_button(config[v])
                 # Buttons need parent set
