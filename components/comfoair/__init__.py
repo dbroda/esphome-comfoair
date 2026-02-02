@@ -21,6 +21,10 @@ ComfoAirPreheaterSwitch = comfoair_ns.class_("ComfoAirPreheaterSwitch", switch.S
 ComfoAirSizeSelect = comfoair_ns.class_("ComfoAirSizeSelect", select.Select)
 ComfoAirRS232ModeSelect = comfoair_ns.class_("ComfoAirRS232ModeSelect", select.Select)
 ComfoAirFanModeSelect = comfoair_ns.class_("ComfoAirFanModeSelect", select.Select)
+ComfoAirTestModeSwitch = comfoair_ns.class_("ComfoAirTestModeSwitch", switch.Switch)
+ComfoAirTestFanSpeedNumber = comfoair_ns.class_("ComfoAirTestFanSpeedNumber", number.Number)
+ComfoAirTestOutputSwitch = comfoair_ns.class_("ComfoAirTestOutputSwitch", switch.Switch)
+ComfoAirTestFlapSelect = comfoair_ns.class_("ComfoAirTestFlapSelect", select.Select)
 
 DEPENDENCIES = ["uart"]
 AUTO_LOAD = ["sensor", "climate", "binary_sensor", "text_sensor", "select", "number", "button", "switch"]
@@ -180,6 +184,18 @@ CONF_START_SELF_TEST = "start_self_test"
 # Switch entities
 CONF_PREHEATER_PRESENT_SWITCH = "preheater_present_switch"
 
+# Test mode entities
+CONF_TEST_MODE_SWITCH = "test_mode_switch"
+CONF_TEST_SUPPLY_FAN_NUMBER = "test_supply_fan_number"
+CONF_TEST_EXHAUST_FAN_NUMBER = "test_exhaust_fan_number"
+CONF_TEST_PREHEATING_RELAY_SWITCH = "test_preheating_relay_switch"
+CONF_TEST_PREHEATING_TRIAC_SWITCH = "test_preheating_triac_switch"
+CONF_TEST_KITCHEN_HOOD_SWITCH = "test_kitchen_hood_switch"
+CONF_TEST_ERROR_LED_SWITCH = "test_error_led_switch"
+CONF_TEST_FILTER_LED_SWITCH = "test_filter_led_switch"
+CONF_TEST_BYPASS_FLAP_SELECT = "test_bypass_flap_select"
+CONF_TEST_PREHEATING_FLAP_SELECT = "test_preheating_flap_select"
+
 helper_comfoair = {
     "sensor": [
         CONF_INTAKE_FAN_SPEED,
@@ -310,6 +326,8 @@ helper_comfoair = {
         CONF_SIZE_SELECT,
         CONF_RS232_MODE_SELECT,
         CONF_FAN_MODE_SELECT,
+        CONF_TEST_BYPASS_FLAP_SELECT,
+        CONF_TEST_PREHEATING_FLAP_SELECT,
     ],
     "number": [
         # Ventilation levels
@@ -331,6 +349,10 @@ helper_comfoair = {
         CONF_RF_HIGH_TIME_SHORT_MINUTES_NUMBER,
         CONF_RF_HIGH_TIME_LONG_MINUTES_NUMBER,
         CONF_EXTRACTOR_HOOD_SWITCH_OFF_DELAY_MINUTES_NUMBER,
+        
+        # Test mode numbers
+        CONF_TEST_SUPPLY_FAN_NUMBER,
+        CONF_TEST_EXHAUST_FAN_NUMBER,
     ],
     "button": [
         CONF_RESET_ERRORS,
@@ -338,6 +360,12 @@ helper_comfoair = {
     ],
     "switch": [
         CONF_PREHEATER_PRESENT_SWITCH,
+        CONF_TEST_MODE_SWITCH,
+        CONF_TEST_PREHEATING_RELAY_SWITCH,
+        CONF_TEST_PREHEATING_TRIAC_SWITCH,
+        CONF_TEST_KITCHEN_HOOD_SWITCH,
+        CONF_TEST_ERROR_LED_SWITCH,
+        CONF_TEST_FILTER_LED_SWITCH,
     ],
 }
 
@@ -755,6 +783,48 @@ comfoair_sensors_schemas = cv.Schema(
             ComfoAirPreheaterSwitch,
         ).extend(),
         
+        # Test mode switch
+        cv.Optional(CONF_TEST_MODE_SWITCH): switch.switch_schema(
+            ComfoAirTestModeSwitch,
+        ).extend(),
+        
+        # Test mode fan speed numbers
+        cv.Optional(CONF_TEST_SUPPLY_FAN_NUMBER): number.number_schema(
+            ComfoAirTestFanSpeedNumber,
+            unit_of_measurement=UNIT_PERCENT,
+            device_class=DEVICE_CLASS_EMPTY,
+        ).extend(),
+        cv.Optional(CONF_TEST_EXHAUST_FAN_NUMBER): number.number_schema(
+            ComfoAirTestFanSpeedNumber,
+            unit_of_measurement=UNIT_PERCENT,
+            device_class=DEVICE_CLASS_EMPTY,
+        ).extend(),
+        
+        # Test mode relay/output switches
+        cv.Optional(CONF_TEST_PREHEATING_RELAY_SWITCH): switch.switch_schema(
+            ComfoAirTestOutputSwitch,
+        ).extend(),
+        cv.Optional(CONF_TEST_PREHEATING_TRIAC_SWITCH): switch.switch_schema(
+            ComfoAirTestOutputSwitch,
+        ).extend(),
+        cv.Optional(CONF_TEST_KITCHEN_HOOD_SWITCH): switch.switch_schema(
+            ComfoAirTestOutputSwitch,
+        ).extend(),
+        cv.Optional(CONF_TEST_ERROR_LED_SWITCH): switch.switch_schema(
+            ComfoAirTestOutputSwitch,
+        ).extend(),
+        cv.Optional(CONF_TEST_FILTER_LED_SWITCH): switch.switch_schema(
+            ComfoAirTestOutputSwitch,
+        ).extend(),
+        
+        # Test mode flap selects
+        cv.Optional(CONF_TEST_BYPASS_FLAP_SELECT): select.select_schema(
+            ComfoAirTestFlapSelect,
+        ).extend(),
+        cv.Optional(CONF_TEST_PREHEATING_FLAP_SELECT): select.select_schema(
+            ComfoAirTestFlapSelect,
+        ).extend(),
+        
         # Ventilation level number components
         cv.Optional(CONF_SUPPLY_ABSENT_PERCENT): number.number_schema(
             ComfoAirVentilationLevelNumber,
@@ -935,13 +1005,78 @@ def to_code(config):
             func = getattr(var, "set_" + conf_key)
             cg.add(func(sens))
     
+    # Handle test mode fan speed number components
+    if CONF_TEST_SUPPLY_FAN_NUMBER in config:
+        sens = yield number.new_number(
+            config[CONF_TEST_SUPPLY_FAN_NUMBER],
+            min_value=0.0,
+            max_value=100.0,
+            step=1.0
+        )
+        cg.add(sens.set_parent(var))
+        cg.add(sens.set_is_supply_fan(True))
+        cg.add(var.set_test_supply_fan_number(sens))
+    
+    if CONF_TEST_EXHAUST_FAN_NUMBER in config:
+        sens = yield number.new_number(
+            config[CONF_TEST_EXHAUST_FAN_NUMBER],
+            min_value=0.0,
+            max_value=100.0,
+            step=1.0
+        )
+        cg.add(sens.set_parent(var))
+        cg.add(sens.set_is_supply_fan(False))
+        cg.add(var.set_test_exhaust_fan_number(sens))
+    
+    # Handle test mode output switches with bitmasks
+    test_output_switches = [
+        (CONF_TEST_PREHEATING_RELAY_SWITCH, 0x01, False),  # Byte[0] bit 0
+        (CONF_TEST_PREHEATING_TRIAC_SWITCH, 0x02, False),   # Byte[0] bit 1
+        (CONF_TEST_KITCHEN_HOOD_SWITCH, 0x10, False),       # Byte[0] bit 4
+        (CONF_TEST_ERROR_LED_SWITCH, 0x20, False),          # Byte[0] bit 5
+        (CONF_TEST_FILTER_LED_SWITCH, 0x01, True),          # Byte[1] bit 0
+    ]
+    
+    for conf_key, mask, is_feedback in test_output_switches:
+        if conf_key in config:
+            sens = yield switch.new_switch(config[conf_key])
+            cg.add(sens.set_parent(var))
+            cg.add(sens.set_output_mask(mask, is_feedback))
+            func = getattr(var, "set_" + conf_key)
+            cg.add(func(sens))
+    
+    # Handle test mode flap selects
+    if CONF_TEST_BYPASS_FLAP_SELECT in config:
+        sens = yield select.new_select(config[CONF_TEST_BYPASS_FLAP_SELECT], options=["Closed", "Open", "Stop"])
+        cg.add(sens.set_parent(var))
+        cg.add(sens.set_is_bypass_flap(True))
+        cg.add(var.set_test_bypass_flap_select(sens))
+    
+    if CONF_TEST_PREHEATING_FLAP_SELECT in config:
+        sens = yield select.new_select(config[CONF_TEST_PREHEATING_FLAP_SELECT], options=["Closed", "Open", "Stop"])
+        cg.add(sens.set_parent(var))
+        cg.add(sens.set_is_bypass_flap(False))
+        cg.add(var.set_test_preheating_flap_select(sens))
+    
+    # Handle test mode switch separately
+    if CONF_TEST_MODE_SWITCH in config:
+        sens = yield switch.new_switch(config[CONF_TEST_MODE_SWITCH])
+        cg.add(sens.set_parent(var))
+        cg.add(var.set_test_mode_switch(sens))
+    
     # Handle all other components (sensors, binary_sensors, text_sensors, select, buttons, switches)
     for k, values in helper_comfoair.items():
         if k == "number":
-            # Already handled above
+            # Already handled above (ventilation levels, time delays, test mode fans)
             continue
         for v in values:
             if not v in config:
+                continue
+            # Skip test mode entities - they are handled separately above
+            if v in [CONF_TEST_MODE_SWITCH, CONF_TEST_SUPPLY_FAN_NUMBER, CONF_TEST_EXHAUST_FAN_NUMBER,
+                     CONF_TEST_PREHEATING_RELAY_SWITCH, CONF_TEST_PREHEATING_TRIAC_SWITCH,
+                     CONF_TEST_KITCHEN_HOOD_SWITCH, CONF_TEST_ERROR_LED_SWITCH, CONF_TEST_FILTER_LED_SWITCH,
+                     CONF_TEST_BYPASS_FLAP_SELECT, CONF_TEST_PREHEATING_FLAP_SELECT]:
                 continue
             sens = None
             if k == "sensor":

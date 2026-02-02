@@ -123,6 +123,61 @@ namespace esphome
       ComfoAirComponent *parent_{nullptr};
     };
 
+    class ComfoAirTestModeSwitch : public switch_::Switch
+    {
+    public:
+      void set_parent(ComfoAirComponent *parent) { this->parent_ = parent; }
+
+    protected:
+      void write_state(bool state) override;
+
+    private:
+      ComfoAirComponent *parent_{nullptr};
+    };
+
+    class ComfoAirTestFanSpeedNumber : public number::Number
+    {
+    public:
+      void set_parent(ComfoAirComponent *parent) { this->parent_ = parent; }
+      void set_is_supply_fan(bool is_supply) { this->is_supply_fan_ = is_supply; }
+
+    protected:
+      void control(float value) override;
+
+    private:
+      ComfoAirComponent *parent_{nullptr};
+      bool is_supply_fan_{true};
+    };
+
+    class ComfoAirTestOutputSwitch : public switch_::Switch
+    {
+    public:
+      void set_parent(ComfoAirComponent *parent) { this->parent_ = parent; }
+      void set_output_mask(uint8_t mask, bool is_feedback) { this->output_mask_ = mask; this->is_feedback_ = is_feedback; }
+
+    protected:
+      void write_state(bool state) override;
+
+    private:
+      ComfoAirComponent *parent_{nullptr};
+      uint8_t output_mask_{0};
+      bool is_feedback_{false};
+    };
+
+    class ComfoAirTestFlapSelect : public select::Select
+    {
+    public:
+      void set_parent(ComfoAirComponent *parent) { this->parent_ = parent; }
+      void set_is_bypass_flap(bool is_bypass) { this->is_bypass_flap_ = is_bypass; }
+
+    protected:
+      void control(const std::string &value) override;
+
+    private:
+      ComfoAirComponent *parent_{nullptr};
+      bool is_bypass_flap_{true};
+    };
+
     class ComfoAirComponent : public climate::Climate, public PollingComponent, public uart::UARTDevice
     {
       friend class ComfoAirSizeSelect;
@@ -133,6 +188,10 @@ namespace esphome
       friend class ComfoAirPreheaterSwitch;
       friend class ComfoAirRS232ModeSelect;
       friend class ComfoAirFanModeSelect;
+      friend class ComfoAirTestModeSwitch;
+      friend class ComfoAirTestFanSpeedNumber;
+      friend class ComfoAirTestOutputSwitch;
+      friend class ComfoAirTestFlapSelect;
 
     public:
       // Poll every 600ms
@@ -328,6 +387,138 @@ namespace esphome
       {
         uint8_t reset_cmd[4] = {0, 0, 0, 1};
         write_command_(CMD_RESET_AND_SELF_TEST, reset_cmd, sizeof(reset_cmd));
+      }
+
+      void setup() override
+      {
+        // Ensure test mode is exited on boot
+        test_mode_active_ = false;
+        test_relay_state_ = 0;
+        test_feedback_state_ = 0;
+        bypass_flap_state_ = 0;
+        preheating_flap_state_ = 0;
+      }
+
+      void set_test_mode(bool active)
+      {
+        if (active)
+        {
+          ESP_LOGI(TAG, "Entering ComfoAir test mode");
+          write_command_(CMD_SET_TEST_MODE, nullptr, 0);
+        }
+        else
+        {
+          ESP_LOGI(TAG, "Exiting ComfoAir test mode");
+          write_command_(CMD_EXIT_TEST_MODE, nullptr, 0);
+        }
+        test_mode_active_ = active;
+        
+        // Update test mode switch state
+        if (test_mode_switch_ != nullptr)
+        {
+          test_mode_switch_->publish_state(active);
+        }
+      }
+
+      bool set_test_fan_speed(bool is_supply, uint8_t percent)
+      {
+        if (!test_mode_active_)
+        {
+          ESP_LOGW(TAG, "Test mode command rejected - test mode not active");
+          return false;
+        }
+
+        if (percent > 100)
+        {
+          ESP_LOGW(TAG, "Invalid fan speed: %u%%", percent);
+          return false;
+        }
+
+        if (is_supply)
+        {
+          test_supply_fan_speed_ = percent;
+        }
+        else
+        {
+          test_exhaust_fan_speed_ = percent;
+        }
+
+        // CMD_SET_ANALOG_OUTPUTS: Byte[0]=supply%, Byte[1]=exhaust%, Byte[2]=postheating% (always 0)
+        uint8_t command[3] = {test_supply_fan_speed_, test_exhaust_fan_speed_, 0};
+        ESP_LOGI(TAG, "Setting test fan speeds: supply=%u%%, exhaust=%u%%", test_supply_fan_speed_, test_exhaust_fan_speed_);
+        write_command_(CMD_SET_ANALOG_OUTPUTS, command, sizeof(command));
+        return true;
+      }
+
+      bool set_test_output(uint8_t mask, bool is_feedback, bool state)
+      {
+        if (!test_mode_active_)
+        {
+          ESP_LOGW(TAG, "Test mode command rejected - test mode not active");
+          return false;
+        }
+
+        if (is_feedback)
+        {
+          if (state)
+          {
+            test_feedback_state_ |= mask;
+          }
+          else
+          {
+            test_feedback_state_ &= ~mask;
+          }
+        }
+        else
+        {
+          if (state)
+          {
+            test_relay_state_ |= mask;
+          }
+          else
+          {
+            test_relay_state_ &= ~mask;
+          }
+        }
+
+        // CMD_SET_OUTPUTS: Byte[0]=relay state, Byte[1]=feedback state
+        uint8_t command[2] = {test_relay_state_, test_feedback_state_};
+        ESP_LOGI(TAG, "Setting test outputs: relays=0x%02X, feedback=0x%02X", test_relay_state_, test_feedback_state_);
+        write_command_(CMD_SET_OUTPUTS, command, sizeof(command));
+        return true;
+      }
+
+      bool set_test_flap(bool is_bypass, uint8_t position)
+      {
+        if (!test_mode_active_)
+        {
+          ESP_LOGW(TAG, "Test mode command rejected - test mode not active");
+          return false;
+        }
+
+        // Valid positions: 0=Closed, 1=Open, 3=Stop
+        if (position != 0 && position != 1 && position != 3)
+        {
+          ESP_LOGW(TAG, "Invalid flap position: %u", position);
+          return false;
+        }
+
+        if (is_bypass)
+        {
+          bypass_flap_state_ = position;
+        }
+        else
+        {
+          preheating_flap_state_ = position;
+        }
+
+        // CMD_SET_FLAPS: Byte[0]=bypass, Byte[1]=preheating
+        uint8_t command[2] = {bypass_flap_state_, preheating_flap_state_};
+        const char* flap_name = is_bypass ? "bypass" : "preheating";
+        const char* position_name = position == 0 ? "Closed" : (position == 1 ? "Open" : "Stop");
+        ESP_LOGI(TAG, "Setting %s flap to %s (bypass=%u, preheating=%u)", flap_name, position_name, bypass_flap_state_, preheating_flap_state_);
+        write_command_(CMD_SET_FLAPS, command, sizeof(command));
+        return true;
       }
 
       void set_name(const char *value) { name = value; }
@@ -594,6 +785,22 @@ namespace esphome
           break;
         case RES_GET_CONNECTOR_BOARD_VERSION:
           memcpy(connector_board_version_, msg, data_[COMMAND_IDX_DATA]);
+          break;
+        case RES_SET_TEST_MODE:
+          ESP_LOGI(TAG, "Test mode activated");
+          test_mode_active_ = true;
+          if (test_mode_switch_ != nullptr)
+          {
+            test_mode_switch_->publish_state(true);
+          }
+          break;
+        case RES_EXIT_TEST_MODE:
+          ESP_LOGI(TAG, "Test mode deactivated");
+          test_mode_active_ = false;
+          if (test_mode_switch_ != nullptr)
+          {
+            test_mode_switch_->publish_state(false);
+          }
           break;
         case RES_GET_FAN_STATUS:
         {
@@ -1596,6 +1803,27 @@ namespace esphome
       select::Select *rs232_mode_select_{nullptr};
       select::Select *fan_mode_select_{nullptr};
       
+      // Test mode entities
+      switch_::Switch *test_mode_switch_{nullptr};
+      number::Number *test_supply_fan_number_{nullptr};
+      number::Number *test_exhaust_fan_number_{nullptr};
+      switch_::Switch *test_preheating_relay_switch_{nullptr};
+      switch_::Switch *test_preheating_triac_switch_{nullptr};
+      switch_::Switch *test_kitchen_hood_switch_{nullptr};
+      switch_::Switch *test_error_led_switch_{nullptr};
+      switch_::Switch *test_filter_led_switch_{nullptr};
+      select::Select *test_bypass_flap_select_{nullptr};
+      select::Select *test_preheating_flap_select_{nullptr};
+      
+      // Test mode state tracking
+      bool test_mode_active_{false};
+      uint8_t test_relay_state_{0};
+      uint8_t test_feedback_state_{0};
+      uint8_t test_supply_fan_speed_{0};
+      uint8_t test_exhaust_fan_speed_{0};
+      uint8_t bypass_flap_state_{0};
+      uint8_t preheating_flap_state_{0};
+      
       // Default ventilation percentages for fan_mode control
       static constexpr uint8_t DEFAULT_SUPPLY_ABSENT = 15;
       static constexpr uint8_t DEFAULT_SUPPLY_LOW = 35;
@@ -1753,6 +1981,16 @@ namespace esphome
       void set_preheater_present_switch(switch_::Switch *preheater_present_switch) { this->preheater_present_switch_ = preheater_present_switch; };
       void set_rs232_mode_select(select::Select *rs232_mode_select) { this->rs232_mode_select_ = rs232_mode_select; };
       void set_fan_mode_select(select::Select *fan_mode_select) { this->fan_mode_select_ = fan_mode_select; };
+      void set_test_mode_switch(switch_::Switch *test_mode_switch) { this->test_mode_switch_ = test_mode_switch; };
+      void set_test_supply_fan_number(number::Number *test_supply_fan_number) { this->test_supply_fan_number_ = test_supply_fan_number; };
+      void set_test_exhaust_fan_number(number::Number *test_exhaust_fan_number) { this->test_exhaust_fan_number_ = test_exhaust_fan_number; };
+      void set_test_preheating_relay_switch(switch_::Switch *test_preheating_relay_switch) { this->test_preheating_relay_switch_ = test_preheating_relay_switch; };
+      void set_test_preheating_triac_switch(switch_::Switch *test_preheating_triac_switch) { this->test_preheating_triac_switch_ = test_preheating_triac_switch; };
+      void set_test_kitchen_hood_switch(switch_::Switch *test_kitchen_hood_switch) { this->test_kitchen_hood_switch_ = test_kitchen_hood_switch; };
+      void set_test_error_led_switch(switch_::Switch *test_error_led_switch) { this->test_error_led_switch_ = test_error_led_switch; };
+      void set_test_filter_led_switch(switch_::Switch *test_filter_led_switch) { this->test_filter_led_switch_ = test_filter_led_switch; };
+      void set_test_bypass_flap_select(select::Select *test_bypass_flap_select) { this->test_bypass_flap_select_ = test_bypass_flap_select; };
+      void set_test_preheating_flap_select(select::Select *test_preheating_flap_select) { this->test_preheating_flap_select_ = test_preheating_flap_select; };
       bool set_rs232_mode(uint8_t mode);
       bool set_fan_mode(const std::string &mode);
     };
@@ -2200,6 +2438,99 @@ namespace esphome
 
       // Forward to parent component
       this->parent_->set_fan_mode(value);
+    }
+
+    inline void ComfoAirTestModeSwitch::write_state(bool state)
+    {
+      if (this->parent_ == nullptr)
+      {
+        ESP_LOGW(TAG, "Test mode switch has no parent component configured");
+        return;
+      }
+
+      this->parent_->set_test_mode(state);
+      this->publish_state(state);
+    }
+
+    inline void ComfoAirTestFanSpeedNumber::control(float value)
+    {
+      if (this->parent_ == nullptr)
+      {
+        ESP_LOGW(TAG, "Test fan speed number has no parent component configured");
+        return;
+      }
+
+      uint8_t percent = static_cast<uint8_t>(value);
+      if (!this->parent_->set_test_fan_speed(this->is_supply_fan_, percent))
+      {
+        // Revert to current value if setting failed
+        uint8_t current = this->is_supply_fan_ ? this->parent_->test_supply_fan_speed_ : this->parent_->test_exhaust_fan_speed_;
+        this->publish_state(current);
+      }
+      else
+      {
+        this->publish_state(percent);
+      }
+    }
+
+    inline void ComfoAirTestOutputSwitch::write_state(bool state)
+    {
+      if (this->parent_ == nullptr)
+      {
+        ESP_LOGW(TAG, "Test output switch has no parent component configured");
+        return;
+      }
+
+      if (this->parent_->set_test_output(this->output_mask_, this->is_feedback_, state))
+      {
+        this->publish_state(state);
+      }
+      else
+      {
+        // Revert to previous state if command failed
+        this->publish_state(!state);
+      }
+    }
+
+    inline void ComfoAirTestFlapSelect::control(const std::string &value)
+    {
+      if (this->parent_ == nullptr)
+      {
+        ESP_LOGW(TAG, "Test flap select has no parent component configured");
+        return;
+      }
+
+      // Map option to position value
+      uint8_t position = 0;
+      if (value == "Closed")
+      {
+        position = 0;
+      }
+      else if (value == "Open")
+      {
+        position = 1;
+      }
+      else if (value == "Stop")
+      {
+        position = 3;
+      }
+      else
+      {
+        ESP_LOGW(TAG, "Test flap select received invalid option: %s", value.c_str());
+        return;
+      }
+
+      if (!this->parent_->set_test_flap(this->is_bypass_flap_, position))
+      {
+        // Revert to current value if setting failed
+        uint8_t current = this->is_bypass_flap_ ? this->parent_->bypass_flap_state_ : this->parent_->preheating_flap_state_;
+        const char *current_name = current == 0 ? "Closed" : (current == 1 ? "Open" : "Stop");
+        this->publish_state(current_name);
+      }
+      else
+      {
+        this->publish_state(value);
+      }
     }
 
   } // namespace comfoair
