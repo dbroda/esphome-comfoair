@@ -350,7 +350,7 @@ namespace esphome
           return;
         }
 
-        ESP_LOGI(TAG, "Setting level to: %i", level);
+        ESP_LOGI(TAG, "Setting ventilation level to: %i", level);
         {
           uint8_t command[1] = {(uint8_t)level};
           write_command_(CMD_SET_LEVEL, command, sizeof(command));
@@ -365,7 +365,7 @@ namespace esphome
           return;
         }
 
-        ESP_LOGI(TAG, "Setting temperature to: %i", temperature);
+        ESP_LOGI(TAG, "Setting comfort temperature to: %.1f°C (raw value: %u)", temperature, (uint8_t)((temperature + 20.0f) * 2.0f));
         {
           uint8_t command[1] = {(uint8_t)((temperature + 20.0f) * 2.0f)};
           write_command_(CMD_SET_COMFORT_TEMPERATURE, command, sizeof(command));
@@ -408,7 +408,12 @@ namespace esphome
         command[7] = ventilation_levels_[3]; // supply high
         command[8] = 0x00;
         
-        ESP_LOGI(TAG, "Setting ventilation level %u to %u%%", level_index, percent);
+        const char* level_names[] = {"supply_absent", "supply_low", "supply_medium", "supply_high", 
+                                      "exhaust_absent", "exhaust_low", "exhaust_medium", "exhaust_high"};
+        ESP_LOGI(TAG, "Setting ventilation level %s (index %u) to %u%% (all levels: SA=%u SL=%u SM=%u SH=%u EA=%u EL=%u EM=%u EH=%u)", 
+                 level_names[level_index], level_index, percent,
+                 ventilation_levels_[0], ventilation_levels_[1], ventilation_levels_[2], ventilation_levels_[3],
+                 ventilation_levels_[4], ventilation_levels_[5], ventilation_levels_[6], ventilation_levels_[7]);
         write_command_(CMD_SET_VENTILATION_LEVEL, command, sizeof(command));
         return true;
       }
@@ -437,7 +442,12 @@ namespace esphome
           command[i] = time_delays_[i];
         }
         
-        ESP_LOGI(TAG, "Setting time delay %u to %u", delay_index, value);
+        const char* delay_names[] = {"bathroom_on", "bathroom_off", "l1_off", "boost", 
+                                      "filter_warning", "rf_short", "rf_long", "extractor_hood"};
+        ESP_LOGI(TAG, "Setting time delay %s (index %u) to %u (all delays: %u,%u,%u,%u,%u,%u,%u,%u)", 
+                 delay_names[delay_index], delay_index, value,
+                 time_delays_[0], time_delays_[1], time_delays_[2], time_delays_[3],
+                 time_delays_[4], time_delays_[5], time_delays_[6], time_delays_[7]);
         write_command_(CMD_SET_TIME_DELAY, command, sizeof(command));
         return true;
       }
@@ -1818,7 +1828,7 @@ namespace esphome
       memcpy(payload, status_payload_, sizeof(status_payload_));
       payload[3] = raw_size;
 
-      ESP_LOGI(TAG, "Setting unit size to %s", unit_size_text_label_(raw_size));
+      ESP_LOGI(TAG, "Setting unit size to %s (raw value: %u)", unit_size_text_label_(raw_size), raw_size);
       write_command_(CMD_SET_STATUS, payload, sizeof(payload));
 
       status_payload_[3] = raw_size;
@@ -1962,7 +1972,7 @@ namespace esphome
       memcpy(payload, status_payload_, sizeof(status_payload_));
       payload[0] = target_value;
 
-      ESP_LOGI(TAG, "Setting preheater present to %s", present ? "ON" : "OFF");
+      ESP_LOGI(TAG, "Setting preheater present to %s (raw value: %u)", present ? "ON" : "OFF", target_value);
       write_command_(CMD_SET_STATUS, payload, sizeof(payload));
 
       status_payload_[0] = target_value;
@@ -2015,18 +2025,17 @@ namespace esphome
         return false;
       }
 
+      const char *mode_name = rs232_mode_to_string(mode);
       uint8_t command[1] = {mode};
-      ESP_LOGI(TAG, "Setting RS232 mode to %u", mode);
+      ESP_LOGI(TAG, "Setting RS232 mode to %s (raw value: %u)", mode_name ? mode_name : "unknown", mode);
       write_command_(CMD_SET_RS232_MODE, command, sizeof(command));
 
       // Update select entity to reflect the change
       if (rs232_mode_select_ != nullptr)
       {
-        const char *mode_name = rs232_mode_to_string(mode);
         if (mode_name != nullptr)
         {
           rs232_mode_select_->publish_state(mode_name);
-          ESP_LOGD(TAG, "Updated RS232 mode select to: %s", mode_name);
         }
       }
 
@@ -2110,11 +2119,6 @@ namespace esphome
         return false;
       }
 
-      ESP_LOGI(TAG, "Setting fan mode to: %s (Supply: %s, Exhaust: %s)", 
-               mode.c_str(),
-               enable_supply ? "ON" : "OFF",
-               enable_exhaust ? "ON" : "OFF");
-
       // Set ventilation levels based on desired fan states - always use DEFAULT values
       if (enable_supply)
       {
@@ -2147,6 +2151,13 @@ namespace esphome
         ventilation_levels_[6] = DEFAULT_EXHAUST_ABSENT;
         ventilation_levels_[7] = DEFAULT_EXHAUST_ABSENT;
       }
+
+      ESP_LOGI(TAG, "Setting fan mode to: %s (Supply: %s, Exhaust: %s) - levels: SA=%u SL=%u SM=%u SH=%u EA=%u EL=%u EM=%u EH=%u", 
+               mode.c_str(),
+               enable_supply ? "ON" : "OFF",
+               enable_exhaust ? "ON" : "OFF",
+               ventilation_levels_[0], ventilation_levels_[1], ventilation_levels_[2], ventilation_levels_[3],
+               ventilation_levels_[4], ventilation_levels_[5], ventilation_levels_[6], ventilation_levels_[7]);
 
       // Send command with all 8 levels (protocol requires all values)
       uint8_t command[9];
