@@ -587,8 +587,9 @@ namespace esphome
           return false;
         }
 
-        // Update cache
+        // Update cache and profile backup
         ventilation_levels_[level_index] = percent;
+        profile_levels_[level_index] = percent;
 
         // Send command with all 8 levels (protocol requires all values)
         uint8_t command[9];
@@ -613,6 +614,85 @@ namespace esphome
         return true;
       }
 
+    public:
+      /**
+       * Apply a complete speed profile in a single UART command.
+       * Updates both ventilation_levels_[] and profile_levels_[], then writes once.
+       * This avoids race conditions from 8 individual writes and improves reliability.
+       *
+       * @param supply_absent, supply_low, supply_medium, supply_high  Supply fan percentages
+       * @param exhaust_absent, exhaust_low, exhaust_medium, exhaust_high  Exhaust fan percentages
+       * @return true if successful, false if levels not yet valid
+       */
+      bool apply_speed_profile(uint8_t supply_absent, uint8_t supply_low, uint8_t supply_medium, uint8_t supply_high,
+                               uint8_t exhaust_absent, uint8_t exhaust_low, uint8_t exhaust_medium, uint8_t exhaust_high)
+      {
+        if (!ventilation_levels_valid_)
+        {
+          ESP_LOGW(TAG, "Speed profile cannot be applied before initial ventilation levels are received");
+          return false;
+        }
+
+        // Update profile backup (always stores the "intended" values)
+        profile_levels_[0] = supply_absent;
+        profile_levels_[1] = supply_low;
+        profile_levels_[2] = supply_medium;
+        profile_levels_[3] = supply_high;
+        profile_levels_[4] = exhaust_absent;
+        profile_levels_[5] = exhaust_low;
+        profile_levels_[6] = exhaust_medium;
+        profile_levels_[7] = exhaust_high;
+
+        // Update working levels
+        ventilation_levels_[0] = supply_absent;
+        ventilation_levels_[1] = supply_low;
+        ventilation_levels_[2] = supply_medium;
+        ventilation_levels_[3] = supply_high;
+        ventilation_levels_[4] = exhaust_absent;
+        ventilation_levels_[5] = exhaust_low;
+        ventilation_levels_[6] = exhaust_medium;
+        ventilation_levels_[7] = exhaust_high;
+
+        ESP_LOGD(TAG, "Applying speed profile: SA=%u SL=%u SM=%u SH=%u EA=%u EL=%u EM=%u EH=%u",
+                 supply_absent, supply_low, supply_medium, supply_high,
+                 exhaust_absent, exhaust_low, exhaust_medium, exhaust_high);
+
+        // Send single UART command with all 8 levels
+        uint8_t command[9];
+        command[0] = exhaust_absent;
+        command[1] = exhaust_low;
+        command[2] = exhaust_medium;
+        command[3] = supply_absent;
+        command[4] = supply_low;
+        command[5] = supply_medium;
+        command[6] = exhaust_high;
+        command[7] = supply_high;
+        command[8] = 0x00;
+
+        write_command_(CMD_SET_VENTILATION_LEVEL, command, sizeof(command));
+
+        // Publish updated states to number entities
+        if (supply_absent_percent != nullptr)
+          supply_absent_percent->publish_state(supply_absent);
+        if (supply_low_percent != nullptr)
+          supply_low_percent->publish_state(supply_low);
+        if (supply_medium_percent != nullptr)
+          supply_medium_percent->publish_state(supply_medium);
+        if (supply_high_percent != nullptr)
+          supply_high_percent->publish_state(supply_high);
+        if (exhaust_absent_percent != nullptr)
+          exhaust_absent_percent->publish_state(exhaust_absent);
+        if (exhaust_low_percent != nullptr)
+          exhaust_low_percent->publish_state(exhaust_low);
+        if (exhaust_medium_percent != nullptr)
+          exhaust_medium_percent->publish_state(exhaust_medium);
+        if (exhaust_high_percent != nullptr)
+          exhaust_high_percent->publish_state(exhaust_high);
+
+        return true;
+      }
+
+    protected:
       bool set_time_delay(uint8_t delay_index, uint8_t value)
       {
         if (!time_delays_valid_)
@@ -1669,9 +1749,15 @@ namespace esphome
       uint8_t current_unit_size_{0};
       ComfoAirSizeSelect *size_select_{nullptr};
 
-      // Ventilation level cache (8 values: exhaust absent/low/med/high, supply absent/low/med/high)
+      // Ventilation level cache (8 values: supply absent/low/med/high, exhaust absent/low/med/high)
       uint8_t ventilation_levels_[8]{0, 0, 0, 0, 0, 0, 0, 0};
       bool ventilation_levels_valid_{false};
+
+      // Profile levels backup - stores the "intended" levels set by the speed profile.
+      // Used by set_fan_mode() to restore levels when re-enabling a fan.
+      uint8_t profile_levels_[8]{
+          DEFAULT_SUPPLY_ABSENT, DEFAULT_SUPPLY_LOW, DEFAULT_SUPPLY_MEDIUM, DEFAULT_SUPPLY_HIGH,
+          DEFAULT_EXHAUST_ABSENT, DEFAULT_EXHAUST_LOW, DEFAULT_EXHAUST_MEDIUM, DEFAULT_EXHAUST_HIGH};
 
       // Time delay cache (8 values according to CMD_GET_TIME_DELAY)
       uint8_t time_delays_[8]{0, 0, 0, 0, 0, 0, 0, 0};
@@ -2387,37 +2473,41 @@ namespace esphome
         return false;
       }
 
-      // Set ventilation levels based on desired fan states - always use DEFAULT values
+      // Adjust ventilation levels based on desired fan states.
+      // When disabling a fan: set all its levels to the absent value (minimum spin).
+      // When enabling a fan: restore levels from profile_levels_[] backup.
       if (enable_supply)
       {
-        ventilation_levels_[0] = DEFAULT_SUPPLY_ABSENT;
-        ventilation_levels_[1] = DEFAULT_SUPPLY_LOW;
-        ventilation_levels_[2] = DEFAULT_SUPPLY_MEDIUM;
-        ventilation_levels_[3] = DEFAULT_SUPPLY_HIGH;
+        // Restore supply levels from profile backup
+        ventilation_levels_[0] = profile_levels_[0];
+        ventilation_levels_[1] = profile_levels_[1];
+        ventilation_levels_[2] = profile_levels_[2];
+        ventilation_levels_[3] = profile_levels_[3];
       }
       else
       {
-        // Disable supply fan - set all to absent level
-        ventilation_levels_[0] = DEFAULT_SUPPLY_ABSENT;
-        ventilation_levels_[1] = DEFAULT_SUPPLY_ABSENT;
-        ventilation_levels_[2] = DEFAULT_SUPPLY_ABSENT;
-        ventilation_levels_[3] = DEFAULT_SUPPLY_ABSENT;
+        // Disable supply fan - set all supply levels to absent
+        ventilation_levels_[0] = profile_levels_[0]; // keep absent as-is
+        ventilation_levels_[1] = profile_levels_[0]; // low = absent
+        ventilation_levels_[2] = profile_levels_[0]; // medium = absent
+        ventilation_levels_[3] = profile_levels_[0]; // high = absent
       }
 
       if (enable_exhaust)
       {
-        ventilation_levels_[4] = DEFAULT_EXHAUST_ABSENT;
-        ventilation_levels_[5] = DEFAULT_EXHAUST_LOW;
-        ventilation_levels_[6] = DEFAULT_EXHAUST_MEDIUM;
-        ventilation_levels_[7] = DEFAULT_EXHAUST_HIGH;
+        // Restore exhaust levels from profile backup
+        ventilation_levels_[4] = profile_levels_[4];
+        ventilation_levels_[5] = profile_levels_[5];
+        ventilation_levels_[6] = profile_levels_[6];
+        ventilation_levels_[7] = profile_levels_[7];
       }
       else
       {
-        // Disable exhaust fan - set all to absent level
-        ventilation_levels_[4] = DEFAULT_EXHAUST_ABSENT;
-        ventilation_levels_[5] = DEFAULT_EXHAUST_ABSENT;
-        ventilation_levels_[6] = DEFAULT_EXHAUST_ABSENT;
-        ventilation_levels_[7] = DEFAULT_EXHAUST_ABSENT;
+        // Disable exhaust fan - set all exhaust levels to absent
+        ventilation_levels_[4] = profile_levels_[4]; // keep absent as-is
+        ventilation_levels_[5] = profile_levels_[4]; // low = absent
+        ventilation_levels_[6] = profile_levels_[4]; // medium = absent
+        ventilation_levels_[7] = profile_levels_[4]; // high = absent
       }
 
       ESP_LOGI(TAG, "Setting fan mode to: %s (Supply: %s, Exhaust: %s) - levels: SA=%u SL=%u SM=%u SH=%u EA=%u EL=%u EM=%u EH=%u",
