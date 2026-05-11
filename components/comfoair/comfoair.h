@@ -401,6 +401,7 @@ namespace esphome
         test_feedback_state_ = 0;
         bypass_flap_state_ = 0;
         preheating_flap_state_ = 0;
+        active_fan_mode_ = "Both";
       }
 
       void set_test_mode(bool active)
@@ -536,6 +537,80 @@ namespace esphome
       void set_size_select(ComfoAirSizeSelect *size_select);
       bool set_preheater_present(bool present);
 
+      void refresh_ventilation_sync_state_()
+      {
+        if (ventilation_in_sync == nullptr && ventilation_desync_alarm == nullptr)
+        {
+          return;
+        }
+
+        if (!ventilation_levels_valid_ || !profile_levels_initialized_)
+        {
+          return;
+        }
+
+        uint8_t expected_levels[8];
+        for (uint8_t i = 0; i < 8; i++)
+        {
+          expected_levels[i] = profile_levels_[i];
+        }
+
+        const std::string &fan_mode_option = active_fan_mode_;
+
+        if (fan_mode_option == "Supply Only")
+        {
+          expected_levels[4] = profile_levels_[4];
+          expected_levels[5] = profile_levels_[4];
+          expected_levels[6] = profile_levels_[4];
+          expected_levels[7] = profile_levels_[4];
+        }
+        else if (fan_mode_option == "Exhaust Only")
+        {
+          expected_levels[0] = profile_levels_[0];
+          expected_levels[1] = profile_levels_[0];
+          expected_levels[2] = profile_levels_[0];
+          expected_levels[3] = profile_levels_[0];
+        }
+        else if (fan_mode_option == "Off")
+        {
+          expected_levels[0] = profile_levels_[0];
+          expected_levels[1] = profile_levels_[0];
+          expected_levels[2] = profile_levels_[0];
+          expected_levels[3] = profile_levels_[0];
+          expected_levels[4] = profile_levels_[4];
+          expected_levels[5] = profile_levels_[4];
+          expected_levels[6] = profile_levels_[4];
+          expected_levels[7] = profile_levels_[4];
+        }
+
+        bool in_sync = true;
+        for (uint8_t i = 0; i < 8; i++)
+        {
+          if (ventilation_levels_[i] != expected_levels[i])
+          {
+            in_sync = false;
+            break;
+          }
+        }
+
+        if (ventilation_sync_state_known_ && ventilation_sync_state_ == in_sync)
+        {
+          return;
+        }
+
+        ventilation_sync_state_known_ = true;
+        ventilation_sync_state_ = in_sync;
+
+        if (ventilation_in_sync != nullptr)
+        {
+          ventilation_in_sync->publish_state(in_sync);
+        }
+        if (ventilation_desync_alarm != nullptr)
+        {
+          ventilation_desync_alarm->publish_state(!in_sync);
+        }
+      }
+
     protected:
       void set_level_(int level)
       {
@@ -590,6 +665,7 @@ namespace esphome
         // Update cache and profile backup
         ventilation_levels_[level_index] = percent;
         profile_levels_[level_index] = percent;
+        profile_levels_initialized_ = true;
 
         // Send command with all 8 levels (protocol requires all values)
         uint8_t command[9];
@@ -611,6 +687,7 @@ namespace esphome
                  ventilation_levels_[0], ventilation_levels_[1], ventilation_levels_[2], ventilation_levels_[3],
                  ventilation_levels_[4], ventilation_levels_[5], ventilation_levels_[6], ventilation_levels_[7]);
         write_command_(CMD_SET_VENTILATION_LEVEL, command, sizeof(command));
+        refresh_ventilation_sync_state_();
         return true;
       }
 
@@ -642,6 +719,7 @@ namespace esphome
         profile_levels_[5] = exhaust_low;
         profile_levels_[6] = exhaust_medium;
         profile_levels_[7] = exhaust_high;
+        profile_levels_initialized_ = true;
 
         // Update working levels
         ventilation_levels_[0] = supply_absent;
@@ -688,6 +766,8 @@ namespace esphome
           exhaust_medium_percent->publish_state(exhaust_medium);
         if (exhaust_high_percent != nullptr)
           exhaust_high_percent->publish_state(exhaust_high);
+
+        refresh_ventilation_sync_state_();
 
         return true;
       }
@@ -1003,6 +1083,17 @@ namespace esphome
           ventilation_levels_[6] = msg[2];  // exhaust medium
           ventilation_levels_[7] = msg[10]; // exhaust high
           ventilation_levels_valid_ = true;
+
+          if (!profile_levels_initialized_)
+          {
+            for (uint8_t i = 0; i < 8; i++)
+            {
+              profile_levels_[i] = ventilation_levels_[i];
+            }
+            profile_levels_initialized_ = true;
+          }
+
+          refresh_ventilation_sync_state_();
 
           // Publish to number components
           if (supply_absent_percent != nullptr)
@@ -1758,6 +1849,11 @@ namespace esphome
       uint8_t profile_levels_[8]{
           DEFAULT_SUPPLY_ABSENT, DEFAULT_SUPPLY_LOW, DEFAULT_SUPPLY_MEDIUM, DEFAULT_SUPPLY_HIGH,
           DEFAULT_EXHAUST_ABSENT, DEFAULT_EXHAUST_LOW, DEFAULT_EXHAUST_MEDIUM, DEFAULT_EXHAUST_HIGH};
+      bool profile_levels_initialized_{false};
+      std::string active_fan_mode_{"Both"};
+
+      bool ventilation_sync_state_known_{false};
+      bool ventilation_sync_state_{true};
 
       // Time delay cache (8 values according to CMD_GET_TIME_DELAY)
       uint8_t time_delays_[8]{0, 0, 0, 0, 0, 0, 0, 0};
@@ -1818,6 +1914,8 @@ namespace esphome
       binary_sensor::BinarySensor *preheating_state{nullptr};
       binary_sensor::BinarySensor *summer_mode{nullptr};
       binary_sensor::BinarySensor *supply_fan_active{nullptr};
+      binary_sensor::BinarySensor *ventilation_in_sync{nullptr};
+      binary_sensor::BinarySensor *ventilation_desync_alarm{nullptr};
       binary_sensor::BinarySensor *p10_active{nullptr};
       binary_sensor::BinarySensor *p11_active{nullptr};
       binary_sensor::BinarySensor *p12_active{nullptr};
@@ -2007,6 +2105,8 @@ namespace esphome
       void set_frost_protection_level(text_sensor::TextSensor *frost_protection_level) { this->frost_protection_level = frost_protection_level; };
       void set_filter_hours(sensor::Sensor *filter_hours) { this->filter_hours = filter_hours; };
       void set_summer_mode(binary_sensor::BinarySensor *summer_mode) { this->summer_mode = summer_mode; };
+      void set_ventilation_in_sync(binary_sensor::BinarySensor *ventilation_in_sync) { this->ventilation_in_sync = ventilation_in_sync; };
+      void set_ventilation_desync_alarm(binary_sensor::BinarySensor *ventilation_desync_alarm) { this->ventilation_desync_alarm = ventilation_desync_alarm; };
       void set_p10_active(binary_sensor::BinarySensor *p10_active) { this->p10_active = p10_active; };
       void set_p11_active(binary_sensor::BinarySensor *p11_active) { this->p11_active = p11_active; };
       void set_p12_active(binary_sensor::BinarySensor *p12_active) { this->p12_active = p12_active; };
@@ -2536,6 +2636,10 @@ namespace esphome
       {
         fan_mode_select_->publish_state(mode);
       }
+
+      active_fan_mode_ = mode;
+
+      refresh_ventilation_sync_state_();
 
       return true;
     }

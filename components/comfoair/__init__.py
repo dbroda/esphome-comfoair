@@ -4,7 +4,7 @@ import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import binary_sensor, sensor, text_sensor, uart, climate, select, number, button, switch
 from esphome.const import (CONF_ID, CONF_UART_ID, DEVICE_CLASS_CURRENT,
-                           DEVICE_CLASS_EMPTY, DEVICE_CLASS_SPEED,
+                           DEVICE_CLASS_EMPTY, DEVICE_CLASS_PROBLEM, DEVICE_CLASS_SPEED,
                            DEVICE_CLASS_TEMPERATURE, DEVICE_CLASS_VOLUME, DEVICE_CLASS_VOLTAGE,
                            STATE_CLASS_MEASUREMENT, UNIT_AMPERE, UNIT_CELSIUS,
                            UNIT_CUBIC_METER, UNIT_HOUR, UNIT_MINUTE, UNIT_VOLT,
@@ -80,6 +80,8 @@ CONF_LEVEL1_HOURS = "level1_hours"
 CONF_LEVEL2_HOURS = "level2_hours"
 CONF_LEVEL3_HOURS = "level3_hours"
 CONF_FROST_PROTECTION_ACTIVE = "frost_protection_active"
+CONF_VENTILATION_IN_SYNC = "ventilation_in_sync"
+CONF_VENTILATION_DESYNC_ALARM = "ventilation_desync_alarm"
 CONF_FROST_PROTECTION_HOURS = "frost_protection_hours"
 CONF_FROST_PROTECTION_MINUTES = "frost_protection_minutes"
 CONF_FROST_PROTECTION_LEVEL = "frost_protection_level"
@@ -258,6 +260,8 @@ helper_comfoair = {
         CONF_SUMMER_MODE,
         CONF_SUPPLY_FAN_ACTIVE,
         CONF_FROST_PROTECTION_ACTIVE,
+        CONF_VENTILATION_IN_SYNC,
+        CONF_VENTILATION_DESYNC_ALARM,
 
         CONF_P10_ACTIVE,
         CONF_P11_ACTIVE,
@@ -609,6 +613,12 @@ comfoair_sensors_schemas = cv.Schema(
 
         cv.Optional(CONF_FROST_PROTECTION_ACTIVE): binary_sensor.binary_sensor_schema(
             device_class=DEVICE_CLASS_EMPTY
+        ).extend(),
+        cv.Optional(CONF_VENTILATION_IN_SYNC): binary_sensor.binary_sensor_schema(
+            device_class=DEVICE_CLASS_EMPTY
+        ).extend(),
+        cv.Optional(CONF_VENTILATION_DESYNC_ALARM): binary_sensor.binary_sensor_schema(
+            device_class=DEVICE_CLASS_PROBLEM
         ).extend(),
         cv.Optional(CONF_BYPASS_PRESENT): binary_sensor.binary_sensor_schema(
             device_class=DEVICE_CLASS_EMPTY
