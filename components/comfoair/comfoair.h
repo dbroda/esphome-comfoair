@@ -292,6 +292,17 @@ namespace esphome
 
       void update() override
       {
+        // Post-write verify: if a recent write scheduled a verification, fire
+        // get_ventilation_level() now (bypass the round-robin) so sync state
+        // is refreshed within seconds instead of waiting up to 12 minutes.
+        if (pending_verify_until_ != 0 && millis() >= pending_verify_until_)
+        {
+          pending_verify_until_ = 0;
+          ESP_LOGD(TAG, "Post-write verify: forced get_ventilation_level");
+          get_ventilation_level_();
+          return;
+        }
+
         switch (update_counter_)
         {
         case -4:
@@ -635,6 +646,14 @@ namespace esphome
           return;
         }
 
+        // Guard: skip if ComfoAir already has this comfort temperature.
+        // target_temperature is updated from hardware readback (RES_GET_TEMPERATURES).
+        if (!std::isnan(target_temperature) && target_temperature == temperature)
+        {
+          ESP_LOGD(TAG, "Comfort temperature %.1f°C already confirmed by ComfoAir, skipping write", temperature);
+          return;
+        }
+
         ESP_LOGI(TAG, "Setting comfort temperature to: %.1f°C (raw value: %u)", temperature, (uint8_t)((temperature + 20.0f) * 2.0f));
         {
           uint8_t command[1] = {(uint8_t)((temperature + 20.0f) * 2.0f)};
@@ -710,7 +729,22 @@ namespace esphome
           return false;
         }
 
-        // Update profile backup (always stores the "intended" values)
+        // Guard: skip UART write if ComfoAir already has these exact values.
+        // ventilation_levels_[] is updated from hardware readback (RES_GET_VENTILATION_LEVEL),
+        // so this compares against confirmed hardware state, not just last-written values.
+        // Resync path still works: when ComfoAir drifts, readback overwrites ventilation_levels_[]
+        // with drifted values, so the comparison detects the difference and allows the write.
+        bool changed =
+            ventilation_levels_[0] != supply_absent  ||
+            ventilation_levels_[1] != supply_low     ||
+            ventilation_levels_[2] != supply_medium  ||
+            ventilation_levels_[3] != supply_high    ||
+            ventilation_levels_[4] != exhaust_absent ||
+            ventilation_levels_[5] != exhaust_low    ||
+            ventilation_levels_[6] != exhaust_medium ||
+            ventilation_levels_[7] != exhaust_high;
+
+        // Always update profile backup (stores the "intended" values regardless of skip)
         profile_levels_[0] = supply_absent;
         profile_levels_[1] = supply_low;
         profile_levels_[2] = supply_medium;
@@ -720,6 +754,16 @@ namespace esphome
         profile_levels_[6] = exhaust_medium;
         profile_levels_[7] = exhaust_high;
         profile_levels_initialized_ = true;
+
+        if (!changed)
+        {
+          ESP_LOGD(TAG, "Speed profile already confirmed by ComfoAir, skipping write "
+                        "(SA=%u SL=%u SM=%u SH=%u EA=%u EL=%u EM=%u EH=%u)",
+                   supply_absent, supply_low, supply_medium, supply_high,
+                   exhaust_absent, exhaust_low, exhaust_medium, exhaust_high);
+          refresh_ventilation_sync_state_();
+          return true;
+        }
 
         // Update working levels
         ventilation_levels_[0] = supply_absent;
@@ -748,6 +792,11 @@ namespace esphome
         command[8] = 0x00;
 
         write_command_(CMD_SET_VENTILATION_LEVEL, command, sizeof(command));
+
+        // Schedule post-write verify: forced get_ventilation_level in ~5s to
+        // confirm ComfoAir accepted the new levels. Sync state will refresh
+        // and watchdog (firmware-side interval) can retry if desync.
+        pending_verify_until_ = millis() + 5000;
 
         // Publish updated states to number entities
         if (supply_absent_percent != nullptr)
@@ -785,6 +834,17 @@ namespace esphome
         {
           ESP_LOGW(TAG, "Invalid time delay index: %u", delay_index);
           return false;
+        }
+
+        // Guard: skip if ComfoAir already has this value.
+        // time_delays_[] is updated from hardware readback (RES_GET_TIME_DELAY).
+        if (time_delays_[delay_index] == value)
+        {
+          const char *delay_names[] = {"bathroom_on", "bathroom_off", "l1_off", "boost",
+                                       "filter_warning", "rf_short", "rf_long", "extractor_hood"};
+          ESP_LOGD(TAG, "Time delay %s (index %u) already confirmed by ComfoAir (%u), skipping write",
+                   delay_names[delay_index], delay_index, value);
+          return true;
         }
 
         // Update cache
@@ -1855,6 +1915,11 @@ namespace esphome
       bool ventilation_sync_state_known_{false};
       bool ventilation_sync_state_{true};
 
+      // Post-write verify: after set_fan_mode / apply_speed_profile, schedule a forced
+      // get_ventilation_level() to verify ComfoAir actually applied the command.
+      // 0 = no pending verify. Otherwise millis() value when verify should fire.
+      uint32_t pending_verify_until_{0};
+
       // Time delay cache (8 values according to CMD_GET_TIME_DELAY)
       uint8_t time_delays_[8]{0, 0, 0, 0, 0, 0, 0, 0};
       bool time_delays_valid_{false};
@@ -2573,42 +2638,62 @@ namespace esphome
         return false;
       }
 
-      // Adjust ventilation levels based on desired fan states.
+      // Compute desired levels based on fan states without modifying ventilation_levels_[] yet.
       // When disabling a fan: set all its levels to the absent value (minimum spin).
       // When enabling a fan: restore levels from profile_levels_[] backup.
+      uint8_t desired[8];
       if (enable_supply)
       {
-        // Restore supply levels from profile backup
-        ventilation_levels_[0] = profile_levels_[0];
-        ventilation_levels_[1] = profile_levels_[1];
-        ventilation_levels_[2] = profile_levels_[2];
-        ventilation_levels_[3] = profile_levels_[3];
+        desired[0] = profile_levels_[0];
+        desired[1] = profile_levels_[1];
+        desired[2] = profile_levels_[2];
+        desired[3] = profile_levels_[3];
       }
       else
       {
-        // Disable supply fan - set all supply levels to absent
-        ventilation_levels_[0] = profile_levels_[0]; // keep absent as-is
-        ventilation_levels_[1] = profile_levels_[0]; // low = absent
-        ventilation_levels_[2] = profile_levels_[0]; // medium = absent
-        ventilation_levels_[3] = profile_levels_[0]; // high = absent
+        desired[0] = profile_levels_[0]; // keep absent as-is
+        desired[1] = profile_levels_[0]; // low = absent
+        desired[2] = profile_levels_[0]; // medium = absent
+        desired[3] = profile_levels_[0]; // high = absent
       }
 
       if (enable_exhaust)
       {
-        // Restore exhaust levels from profile backup
-        ventilation_levels_[4] = profile_levels_[4];
-        ventilation_levels_[5] = profile_levels_[5];
-        ventilation_levels_[6] = profile_levels_[6];
-        ventilation_levels_[7] = profile_levels_[7];
+        desired[4] = profile_levels_[4];
+        desired[5] = profile_levels_[5];
+        desired[6] = profile_levels_[6];
+        desired[7] = profile_levels_[7];
       }
       else
       {
-        // Disable exhaust fan - set all exhaust levels to absent
-        ventilation_levels_[4] = profile_levels_[4]; // keep absent as-is
-        ventilation_levels_[5] = profile_levels_[4]; // low = absent
-        ventilation_levels_[6] = profile_levels_[4]; // medium = absent
-        ventilation_levels_[7] = profile_levels_[4]; // high = absent
+        desired[4] = profile_levels_[4]; // keep absent as-is
+        desired[5] = profile_levels_[4]; // low = absent
+        desired[6] = profile_levels_[4]; // medium = absent
+        desired[7] = profile_levels_[4]; // high = absent
       }
+
+      // Guard: skip UART write if ComfoAir already has the resulting levels.
+      // Compares desired levels against ventilation_levels_[] which is updated from hardware readback,
+      // so resync path still works when ComfoAir drifts.
+      bool changed = false;
+      for (uint8_t i = 0; i < 8; i++)
+      {
+        if (ventilation_levels_[i] != desired[i]) { changed = true; break; }
+      }
+
+      if (!changed)
+      {
+        ESP_LOGD(TAG, "Fan mode '%s' already confirmed by ComfoAir, skipping write", mode.c_str());
+        if (fan_mode_select_ != nullptr)
+          fan_mode_select_->publish_state(mode);
+        active_fan_mode_ = mode;
+        refresh_ventilation_sync_state_();
+        return true;
+      }
+
+      // Apply desired levels to working cache
+      for (uint8_t i = 0; i < 8; i++)
+        ventilation_levels_[i] = desired[i];
 
       ESP_LOGI(TAG, "Setting fan mode to: %s (Supply: %s, Exhaust: %s) - levels: SA=%u SL=%u SM=%u SH=%u EA=%u EL=%u EM=%u EH=%u",
                mode.c_str(),
@@ -2630,6 +2715,11 @@ namespace esphome
       command[8] = 0x00;
 
       write_command_(CMD_SET_VENTILATION_LEVEL, command, sizeof(command));
+
+      // Schedule post-write verify: forced get_ventilation_level in ~5s to
+      // confirm ComfoAir accepted the new fan mode levels. Sync state will
+      // refresh and watchdog (firmware-side interval) can retry if desync.
+      pending_verify_until_ = millis() + 5000;
 
       // Update the select entity state
       if (fan_mode_select_ != nullptr)
