@@ -647,8 +647,10 @@ namespace esphome
         }
 
         // Guard: skip if ComfoAir already has this comfort temperature.
-        // target_temperature is updated from hardware readback (RES_GET_TEMPERATURES).
-        if (!std::isnan(target_temperature) && target_temperature == temperature)
+        // hw_confirmed_comfort_temperature_ is updated ONLY from RES_GET_TEMPERATURES readback,
+        // unlike Climate::target_temperature which control() overwrites before this is called.
+        if (!std::isnan(hw_confirmed_comfort_temperature_) &&
+            hw_confirmed_comfort_temperature_ == temperature)
         {
           ESP_LOGD(TAG, "Comfort temperature %.1f°C already confirmed by ComfoAir, skipping write", temperature);
           return;
@@ -1296,7 +1298,9 @@ namespace esphome
         {
 
           // comfort temperature
-          target_temperature = (float)msg[0] / 2.0f - 20.0f;
+          float comfort = (float)msg[0] / 2.0f - 20.0f;
+          hw_confirmed_comfort_temperature_ = comfort;
+          target_temperature = comfort;
           publish_state();
 
           // T1 / outside air
@@ -1923,6 +1927,12 @@ namespace esphome
       // Time delay cache (8 values according to CMD_GET_TIME_DELAY)
       uint8_t time_delays_[8]{0, 0, 0, 0, 0, 0, 0, 0};
       bool time_delays_valid_{false};
+
+      // Comfort temperature cache: updated ONLY from RES_GET_TEMPERATURES readback.
+      // Separate from Climate::target_temperature, which control() overwrites before
+      // calling set_comfort_temperature_() — so it cannot serve as the hardware-confirmed
+      // value the EEPROM guard needs. NaN = not yet confirmed by hardware.
+      float hw_confirmed_comfort_temperature_{NAN};
 
       uint8_t bootloader_version_[13]{0};
       uint8_t firmware_version_[13]{0};
