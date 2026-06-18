@@ -799,6 +799,9 @@ namespace esphome
         // confirm ComfoAir accepted the new levels. Sync state will refresh
         // and watchdog (firmware-side interval) can retry if desync.
         pending_verify_until_ = millis() + 5000;
+        // Force the ComfoAir to re-apply the new percentages to the running fans:
+        // a 0xCF table write alone does not refresh output until a level (0x99) command.
+        pending_level_reissue_ = true;
 
         // Publish updated states to number entities
         if (supply_absent_percent != nullptr)
@@ -1156,6 +1159,28 @@ namespace esphome
           }
 
           refresh_ventilation_sync_state_();
+
+          // Re-apply the running level after a table (0xCF) write. The ComfoAir only
+          // recomputes fan output on a level TRANSITION — re-issuing the SAME level (0x99)
+          // is a no-op (confirmed on hardware: HA/cache showed the new % while the fans
+          // kept the old speed until a manual gear change). So "bounce" the level: step to
+          // a neighbour now and back to the current level shortly after, applying the new
+          // percentages automatically. One-shot; set_level_ does not re-arm the flag.
+          if (pending_level_reissue_)
+          {
+            pending_level_reissue_ = false;
+            uint8_t current_level = msg[8];
+            if (current_level >= 1 && current_level <= 4)
+            {
+              uint8_t nudge_level = (current_level < 4) ? (current_level + 1) : (current_level - 1);
+              ESP_LOGD(TAG, "Bouncing level %u->%u->%u to apply updated ventilation table",
+                       current_level, nudge_level, current_level);
+              set_level_(nudge_level);
+              this->set_timeout("level_reapply", 800, [this, current_level]() {
+                this->set_level_(current_level);
+              });
+            }
+          }
 
           // Publish to number components
           if (supply_absent_percent != nullptr)
@@ -1923,6 +1948,13 @@ namespace esphome
       // get_ventilation_level() to verify ComfoAir actually applied the command.
       // 0 = no pending verify. Otherwise millis() value when verify should fire.
       uint32_t pending_verify_until_{0};
+
+      // After a CMD_SET_VENTILATION_LEVEL (0xCF) table write the ComfoAir does NOT
+      // recompute the running fan output until it gets a level command (0x99). Set this
+      // flag on every effective table write so the next RES_GET_VENTILATION_LEVEL readback
+      // re-issues the current level once — applying the new percentages without a manual
+      // gear toggle. One-shot; cleared on re-issue. set_level_() must NOT set it (no loop).
+      bool pending_level_reissue_{false};
 
       // Time delay cache (8 values according to CMD_GET_TIME_DELAY)
       uint8_t time_delays_[8]{0, 0, 0, 0, 0, 0, 0, 0};
@@ -2730,6 +2762,8 @@ namespace esphome
       // confirm ComfoAir accepted the new fan mode levels. Sync state will
       // refresh and watchdog (firmware-side interval) can retry if desync.
       pending_verify_until_ = millis() + 5000;
+      // Force re-apply of the new fan-mode table to the running fans (0x99 after 0xCF).
+      pending_level_reissue_ = true;
 
       // Update the select entity state
       if (fan_mode_select_ != nullptr)
