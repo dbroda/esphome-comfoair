@@ -18,9 +18,9 @@ namespace esphome
     namespace frame
     {
 
-      static constexpr size_t MAX_FRAME = 64;
-      static constexpr size_t MAX_DATA = MAX_FRAME - COMMAND_LEN_HEAD - 1;
-      static constexpr size_t MAX_ENCODED = 3 + 2 * (2 + MAX_DATA + 1) + 2;
+      inline constexpr size_t MAX_FRAME = 64;
+      inline constexpr size_t MAX_DATA = MAX_FRAME - COMMAND_LEN_HEAD - 1;
+      inline constexpr size_t MAX_ENCODED = 3 + 2 * (2 + MAX_DATA + 1) + 2;
 
       inline uint8_t checksum(uint8_t command, uint8_t length, const uint8_t *data)
       {
@@ -79,16 +79,7 @@ namespace esphome
             escape_pending_ = false;
             if (byte == COMMAND_PREFIX)
               return Result::PENDING;
-            // A lone 0x07 inside the body: the frame is broken, but the 0x07 may have
-            // been the start of the next one.
-            index_ = 0;
-            if (byte == COMMAND_HEAD)
-            {
-              buf_[0] = COMMAND_PREFIX;
-              buf_[1] = COMMAND_HEAD;
-              index_ = 2;
-            }
-            return Result::FRAMING_ERROR;
+            return resync_(1, byte);
           }
 
           switch (index_)
@@ -104,26 +95,21 @@ namespace esphome
               return Result::ACK;
             }
             if (byte == COMMAND_HEAD)
-            {
               buf_[index_++] = byte;
-              return Result::PENDING;
-            }
-            if (byte != COMMAND_PREFIX)
+            else if (byte != COMMAND_PREFIX)
               index_ = 0;
             return Result::PENDING;
           case 2:
             if (byte != 0x00)
-              return fail_();
+              return resync_(0, byte);
             buf_[index_++] = byte;
             return Result::PENDING;
-          default:
-            break;
           }
 
           if (index_ == COMMAND_IDX_DATA && byte > MAX_DATA)
-            return fail_();
+            return resync_(0, byte);
 
-          if (index_ <= COMMAND_IDX_DATA || index_ <= checksum_index_())
+          if (index_ <= checksum_index_())
           {
             buf_[index_++] = byte;
             escape_pending_ = (byte == COMMAND_PREFIX);
@@ -133,19 +119,17 @@ namespace esphome
           if (index_ == checksum_index_() + 1)
           {
             if (byte != COMMAND_PREFIX)
-              return fail_();
+              return resync_(0, byte);
             index_++;
             return Result::PENDING;
           }
 
           if (byte != COMMAND_TAIL)
-            return fail_();
+            return resync_(1, byte);
           index_ = 0;
           return received_checksum() == expected_checksum() ? Result::FRAME : Result::CHECKSUM_ERROR;
         }
 
-        // Unescaped frame laid out as 07 F0 00 <cmd> <len> <data...> <checksum>.
-        const uint8_t *raw() const { return buf_; }
         uint8_t command() const { return buf_[COMMAND_IDX_MSG_ID]; }
         uint8_t length() const { return buf_[COMMAND_IDX_DATA]; }
         const uint8_t *data() const { return buf_ + COMMAND_LEN_HEAD; }
@@ -155,9 +139,11 @@ namespace esphome
       private:
         size_t checksum_index_() const { return COMMAND_LEN_HEAD + length(); }
 
-        Result fail_()
+        // Restart after a broken frame; index 1 means the preceding 0x07 may begin the next one.
+        Result resync_(size_t index, uint8_t byte)
         {
-          index_ = 0;
+          index_ = index;
+          feed(byte);
           return Result::FRAMING_ERROR;
         }
 

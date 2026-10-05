@@ -8,9 +8,7 @@
 #define COMMAND_HEAD 0xF0
 #define COMMAND_LEN_HEAD 5
 #define COMMAND_TAIL 0x0F
-#define COMMAND_LEN_TAIL 3
 #define COMMAND_ACK 0xF3
-#define COMMAND_ID_ACK 1
 #define COMMAND_IDX_DATA 4
 #define COMMAND_IDX_MSG_ID 3
 

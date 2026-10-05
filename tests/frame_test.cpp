@@ -155,3 +155,70 @@ TEST_CASE("round trip for every single-byte payload")
     CHECK(payload(decoder) == data);
   }
 }
+
+TEST_CASE("command byte equal to 0x07")
+{
+  Decoder decoder;
+  CHECK(feed_all(decoder, encode_bytes(0x07, {1, 2})) == std::vector<Result>{Result::FRAME});
+  CHECK(decoder.command() == 0x07);
+}
+
+TEST_CASE("largest frame made only of 0x07")
+{
+  Bytes data(MAX_DATA, 0x07);
+  Decoder decoder;
+  CHECK(feed_all(decoder, encode_bytes(0x0C, data)) == std::vector<Result>{Result::FRAME});
+  CHECK(payload(decoder) == data);
+}
+
+TEST_CASE("acknowledgement between two frames")
+{
+  Bytes wire = encode_bytes(0x0C, {1});
+  wire.insert(wire.end(), {0x07, 0xF3});
+  Bytes second = encode_bytes(0x0C, {2});
+  wire.insert(wire.end(), second.begin(), second.end());
+
+  Decoder decoder;
+  CHECK(feed_all(decoder, wire) == std::vector<Result>{Result::FRAME, Result::ACK, Result::FRAME});
+}
+
+TEST_CASE("frame start right after a broken header is not lost")
+{
+  Bytes wire{0x07, 0xF0};
+  Bytes frame = encode_bytes(0x0C, {2});
+  wire.insert(wire.end(), frame.begin(), frame.end());
+
+  Decoder decoder;
+  CHECK(feed_all(decoder, wire) == std::vector<Result>{Result::FRAMING_ERROR, Result::FRAME});
+  CHECK(payload(decoder) == Bytes{2});
+}
+
+TEST_CASE("frame start right after a truncated frame is not lost")
+{
+  Bytes wire{0x07, 0xF0, 0x00, 0x0C, 0x01, 0x11, 0x22};
+  Bytes frame = encode_bytes(0x0C, {3});
+  wire.insert(wire.end(), frame.begin(), frame.end());
+
+  Decoder decoder;
+  CHECK(feed_all(decoder, wire) == std::vector<Result>{Result::FRAMING_ERROR, Result::FRAME});
+  CHECK(payload(decoder) == Bytes{3});
+}
+
+TEST_CASE("round trip for multi-byte payloads")
+{
+  Decoder decoder;
+  uint32_t seed = 12345;
+  for (int round = 0; round < 500; round++)
+  {
+    seed = seed * 1103515245 + 12345;
+    Bytes data((seed >> 16) % (MAX_DATA + 1));
+    for (auto &b : data)
+    {
+      seed = seed * 1103515245 + 12345;
+      b = (seed >> 16) % 4 == 0 ? 0x07 : static_cast<uint8_t>(seed >> 8);
+    }
+    CAPTURE(round);
+    CHECK(feed_all(decoder, encode_bytes(0x0C, data)) == std::vector<Result>{Result::FRAME});
+    CHECK(payload(decoder) == data);
+  }
+}

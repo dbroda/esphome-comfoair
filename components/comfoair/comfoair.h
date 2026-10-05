@@ -370,7 +370,6 @@ namespace esphome
           switch (decoder_.feed(byte))
           {
           case frame::Result::FRAME:
-            memcpy(data_, decoder_.raw(), COMMAND_LEN_HEAD + decoder_.length() + 1);
             parse_data_();
             break;
           case frame::Result::CHECKSUM_ERROR:
@@ -642,9 +641,11 @@ namespace esphome
           return;
         uint8_t nudge_level = (current_level < 4) ? (current_level + 1) : (current_level - 1);
         ESP_LOGD(TAG, "Bouncing level %u->%u->%u", current_level, nudge_level, current_level);
+        bouncing_ = true;
         set_level_(nudge_level);
         this->set_timeout("level_reapply", 800, [this, current_level]() {
           this->set_level_(current_level);
+          bouncing_ = false;
         });
       }
 
@@ -654,10 +655,12 @@ namespace esphome
       void check_fan_stall_(uint8_t actual_supply, uint8_t actual_exhaust)
       {
         bool exhaust_stalled = commanded_exhaust_percent_ > 0 && actual_exhaust == 0;
-        bool supply_stalled = supply_fan_enabled_ && commanded_supply_percent_ > 0 && actual_supply == 0;
-        if (!commanded_levels_known_ || test_mode_active_ || !(exhaust_stalled || supply_stalled))
+        bool supply_stalled = supply_fan_enabled_ && !frost_protection_running_ &&
+                              commanded_supply_percent_ > 0 && actual_supply == 0;
+        if (test_mode_active_ || commanded_level_ < 1 || commanded_level_ > 4 || !(exhaust_stalled || supply_stalled))
         {
           fan_stall_since_ms_ = 0;
+          fan_stall_kicks_ = 0;
           return;
         }
 
@@ -669,12 +672,16 @@ namespace esphome
         }
         if (now - fan_stall_since_ms_ < FAN_STALL_GRACE_MS)
           return;
+        if (fan_stall_kicks_ >= FAN_STALL_MAX_KICKS || bouncing_)
+          return;
         if (last_fan_stall_kick_ms_ != 0 && now - last_fan_stall_kick_ms_ < FAN_STALL_RETRY_MS)
           return;
 
         last_fan_stall_kick_ms_ = now;
-        ESP_LOGW(TAG, "Fan stalled (supply %u%%/%u%%, exhaust %u%%/%u%% actual/commanded) - bouncing level",
-                 actual_supply, commanded_supply_percent_, actual_exhaust, commanded_exhaust_percent_);
+        fan_stall_kicks_++;
+        ESP_LOGW(TAG, "Fan stalled (supply %u%%/%u%%, exhaust %u%%/%u%% actual/commanded) - bouncing level, attempt %u/%u",
+                 actual_supply, commanded_supply_percent_, actual_exhaust, commanded_exhaust_percent_,
+                 fan_stall_kicks_, FAN_STALL_MAX_KICKS);
         bounce_level_(commanded_level_);
       }
 
@@ -915,31 +922,25 @@ namespace esphome
       void write_command_(const uint8_t command, const uint8_t *command_data, uint8_t command_data_length)
       {
         uint8_t wire[frame::MAX_ENCODED];
-        size_t length = frame::encode(command, command_data, command_data_length, wire);
-        if (length == 0)
-        {
-          ESP_LOGW(TAG, "Command 0x%02X payload too large (%u bytes)", command, command_data_length);
-          return;
-        }
-        write_array(wire, length);
+        write_array(wire, frame::encode(command, command_data, command_data_length, wire));
         flush();
       }
 
       void parse_data_()
       {
         status_clear_warning();
-        uint8_t *msg = &data_[COMMAND_LEN_HEAD];
+        const uint8_t *msg = decoder_.data();
 
-        switch (data_[COMMAND_IDX_MSG_ID])
+        switch (decoder_.command())
         {
         case RES_GET_BOOTLOADER_VERSION:
-          memcpy(bootloader_version_, msg, data_[COMMAND_IDX_DATA]);
+          memcpy(bootloader_version_, msg, std::min<size_t>(decoder_.length(), sizeof(bootloader_version_)));
           break;
         case RES_GET_FIRMWARE_VERSION:
-          memcpy(firmware_version_, msg, data_[COMMAND_IDX_DATA]);
+          memcpy(firmware_version_, msg, std::min<size_t>(decoder_.length(), sizeof(firmware_version_)));
           break;
         case RES_GET_CONNECTOR_BOARD_VERSION:
-          memcpy(connector_board_version_, msg, data_[COMMAND_IDX_DATA]);
+          memcpy(connector_board_version_, msg, std::min<size_t>(decoder_.length(), sizeof(connector_board_version_)));
           break;
         case RES_SET_TEST_MODE:
           ESP_LOGI(TAG, "Test mode activated");
@@ -1087,23 +1088,22 @@ namespace esphome
 
           refresh_ventilation_sync_state_();
 
-          // Re-apply the running level after a table (0xCF) write. The ComfoAir only
-          // recomputes fan output on a level TRANSITION — re-issuing the SAME level (0x99)
-          // is a no-op (confirmed on hardware: HA/cache showed the new % while the fans
-          // kept the old speed until a manual gear change). So "bounce" the level: step to
-          // a neighbour now and back to the current level shortly after, applying the new
-          // percentages automatically. One-shot; set_level_ does not re-arm the flag.
-          if (pending_level_reissue_)
+          // While a bounce is in flight msg[8] is the temporary neighbour level.
+          if (!bouncing_)
           {
-            pending_level_reissue_ = false;
-            bounce_level_(msg[8]);
-          }
+            commanded_exhaust_percent_ = msg[6];
+            commanded_supply_percent_ = msg[7];
+            commanded_level_ = msg[8];
+            supply_fan_enabled_ = (msg[9] == 1);
 
-          commanded_exhaust_percent_ = msg[6];
-          commanded_supply_percent_ = msg[7];
-          commanded_level_ = msg[8];
-          supply_fan_enabled_ = (msg[9] == 1);
-          commanded_levels_known_ = true;
+            // Re-apply the running level after a 0xCF table write. One-shot; set_level_
+            // does not re-arm the flag.
+            if (pending_level_reissue_)
+            {
+              pending_level_reissue_ = false;
+              bounce_level_(msg[8]);
+            }
+          }
 
           // Publish to number components
           if (supply_absent_percent != nullptr)
@@ -1440,7 +1440,7 @@ namespace esphome
             ewt_present->publish_state(msg[10]);
           }
 
-          if (data_[COMMAND_IDX_DATA] >= 11)
+          if (decoder_.length() >= 11)
           {
             status_payload_[0] = msg[0];
             status_payload_[1] = msg[1];
@@ -1524,9 +1524,10 @@ namespace esphome
             preheating_valve->publish_state(name_preheating_valve);
           }
 
+          frost_protection_running_ = (msg[1] != 0);
           if (frost_protection_active != nullptr)
           {
-            frost_protection_active->publish_state(msg[1] != 0);
+            frost_protection_active->publish_state(frost_protection_running_);
           }
 
           if (preheating_state != nullptr)
@@ -1831,12 +1832,12 @@ namespace esphome
 
       uint8_t get_uint8_t_(uint8_t start_index) const
       {
-        return data_[COMMAND_LEN_HEAD + start_index];
+        return decoder_.data()[start_index];
       }
 
       uint16_t get_uint16_(uint8_t start_index) const
       {
-        return (uint16_t(data_[COMMAND_LEN_HEAD + start_index + 1] | data_[COMMAND_LEN_HEAD + start_index] << 8));
+        return (uint16_t(decoder_.data()[start_index + 1] | decoder_.data()[start_index] << 8));
       }
 
       void publish_size_entities_(uint8_t raw_size);
@@ -1844,7 +1845,6 @@ namespace esphome
       const char *unit_size_option_label_(uint8_t raw_size) const;
 
       frame::Decoder decoder_;
-      uint8_t data_[frame::MAX_FRAME];
       int8_t update_counter_{-4};
       const int8_t num_update_counter_elements_{11};
       uint8_t status_payload_[8]{0};
@@ -1881,11 +1881,14 @@ namespace esphome
 
       static constexpr uint32_t FAN_STALL_GRACE_MS{60000};
       static constexpr uint32_t FAN_STALL_RETRY_MS{300000};
+      static constexpr uint8_t FAN_STALL_MAX_KICKS{3};
       uint8_t commanded_supply_percent_{0};
       uint8_t commanded_exhaust_percent_{0};
       uint8_t commanded_level_{0};
       bool supply_fan_enabled_{false};
-      bool commanded_levels_known_{false};
+      bool frost_protection_running_{false};
+      bool bouncing_{false};
+      uint8_t fan_stall_kicks_{0};
       uint32_t fan_stall_since_ms_{0};
       uint32_t last_fan_stall_kick_ms_{0};
 
