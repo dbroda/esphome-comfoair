@@ -13,6 +13,7 @@
 #include "esphome/components/switch/switch.h"
 #include "esphome/components/text_sensor/text_sensor.h"
 #include "registers.h"
+#include "frame.h"
 
 namespace esphome
 {
@@ -364,28 +365,23 @@ namespace esphome
       {
         while (available() != 0)
         {
-          read_byte(&data_[data_index_]);
-          auto check = check_byte_();
-          if (!check.has_value())
+          uint8_t byte;
+          read_byte(&byte);
+          switch (decoder_.feed(byte))
           {
-
-            // finished
-            if (data_[COMMAND_ID_ACK] != COMMAND_ACK)
-            {
-              parse_data_();
-            }
-            data_index_ = 0;
-          }
-          else if (!*check)
-          {
-            // wrong data
-            ESP_LOGV(TAG, "Byte %i of received data frame is invalid.", data_index_);
-            data_index_ = 0;
-          }
-          else
-          {
-            // next byte
-            data_index_++;
+          case frame::Result::FRAME:
+            memcpy(data_, decoder_.raw(), COMMAND_LEN_HEAD + decoder_.length() + 1);
+            parse_data_();
+            break;
+          case frame::Result::CHECKSUM_ERROR:
+            ESP_LOGW(TAG, "ComfoAir Checksum doesn't match: 0x%02X!=0x%02X",
+                     decoder_.received_checksum(), decoder_.expected_checksum());
+            break;
+          case frame::Result::FRAMING_ERROR:
+            ESP_LOGV(TAG, "Invalid ComfoAir frame, resynchronising");
+            break;
+          default:
+            break;
           }
         }
       }
@@ -918,129 +914,15 @@ namespace esphome
 
       void write_command_(const uint8_t command, const uint8_t *command_data, uint8_t command_data_length)
       {
-        write_byte(COMMAND_PREFIX);
-        write_byte(COMMAND_HEAD);
-        write_byte(0x00);
-
-        uint16_t checksum = 173;
-        checksum += command;
-        checksum += command_data_length;
-
-        write_escaped_byte_(command);
-        write_escaped_byte_(command_data_length);
-
-        for (uint8_t i = 0; i < command_data_length; i++)
+        uint8_t wire[frame::MAX_ENCODED];
+        size_t length = frame::encode(command, command_data, command_data_length, wire);
+        if (length == 0)
         {
-          uint8_t data_byte = command_data[i];
-          checksum += data_byte;
-          write_escaped_byte_(data_byte);
+          ESP_LOGW(TAG, "Command 0x%02X payload too large (%u bytes)", command, command_data_length);
+          return;
         }
-
-        uint8_t checksum_byte = static_cast<uint8_t>(checksum & 0xFF);
-        write_escaped_byte_(checksum_byte);
-
-        write_byte(COMMAND_PREFIX);
-        write_byte(COMMAND_TAIL);
+        write_array(wire, length);
         flush();
-      }
-
-      void write_escaped_byte_(uint8_t value)
-      {
-        write_byte(value);
-        if (value == COMMAND_PREFIX)
-        {
-          write_byte(value);
-        }
-      }
-
-      uint8_t comfoair_checksum_(uint8_t command, uint8_t length, const uint8_t *command_data) const
-      {
-        uint16_t sum = 173;
-        sum += command;
-        sum += length;
-        if (command_data != nullptr)
-        {
-          for (uint8_t i = 0; i < length; i++)
-          {
-            sum += command_data[i];
-          }
-        }
-        return static_cast<uint8_t>(sum & 0xFF);
-      }
-
-      optional<bool> check_byte_() const
-      {
-        uint8_t index = data_index_;
-        uint8_t byte = data_[index];
-
-        if (index == 0)
-        {
-          return byte == COMMAND_PREFIX;
-        }
-
-        if (index == 1)
-        {
-          if (byte == COMMAND_ACK)
-          {
-            return {};
-          }
-          else
-          {
-            return byte == COMMAND_HEAD;
-          }
-        }
-
-        if (index == 2)
-        {
-          return byte == 0x00;
-        }
-
-        if (index < COMMAND_LEN_HEAD)
-        {
-          return true;
-        }
-
-        uint8_t data_length = data_[COMMAND_IDX_DATA];
-
-        if ((COMMAND_LEN_HEAD + data_length + COMMAND_LEN_TAIL) > sizeof(data_))
-        {
-          ESP_LOGW(TAG, "ComfoAir message too large");
-          return false;
-        }
-
-        if (index < COMMAND_LEN_HEAD + data_length)
-        {
-          return true;
-        }
-
-        if (index == COMMAND_LEN_HEAD + data_length)
-        {
-          // checksum is without checksum bytes
-          uint8_t checksum = comfoair_checksum_(
-              data_[COMMAND_IDX_MSG_ID], data_length, data_ + COMMAND_LEN_HEAD);
-          if (checksum != byte)
-          {
-            // ESP_LOGW(TAG, "%02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X", data_[0], data_[1], data_[2], data_[3], data_[4], data_[5], data_[6], data_[7], data_[8], data_[9], data_[10]);
-            ESP_LOGW(TAG, "ComfoAir Checksum doesn't match: 0x%02X!=0x%02X", byte, checksum);
-            return false;
-          }
-          return true;
-        }
-
-        if (index == COMMAND_LEN_HEAD + data_length + 1)
-        {
-          return byte == COMMAND_PREFIX;
-        }
-
-        if (index == COMMAND_LEN_HEAD + data_length + 2)
-        {
-          if (byte != COMMAND_TAIL)
-          {
-            return false;
-          }
-        }
-
-        return {};
       }
 
       void parse_data_()
@@ -1961,8 +1843,8 @@ namespace esphome
       const char *unit_size_text_label_(uint8_t raw_size) const;
       const char *unit_size_option_label_(uint8_t raw_size) const;
 
-      uint8_t data_[30];
-      uint8_t data_index_{0};
+      frame::Decoder decoder_;
+      uint8_t data_[frame::MAX_FRAME];
       int8_t update_counter_{-4};
       const int8_t num_update_counter_elements_{11};
       uint8_t status_payload_[8]{0};
