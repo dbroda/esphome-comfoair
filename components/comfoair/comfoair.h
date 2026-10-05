@@ -638,6 +638,50 @@ namespace esphome
         }
       }
 
+      // The ComfoAir only recomputes fan output on a level TRANSITION — re-issuing the
+      // SAME level (0x99) is a no-op. Step to a neighbour and back to force it.
+      void bounce_level_(uint8_t current_level)
+      {
+        if (current_level < 1 || current_level > 4)
+          return;
+        uint8_t nudge_level = (current_level < 4) ? (current_level + 1) : (current_level - 1);
+        ESP_LOGD(TAG, "Bouncing level %u->%u->%u", current_level, nudge_level, current_level);
+        set_level_(nudge_level);
+        this->set_timeout("level_reapply", 800, [this, current_level]() {
+          this->set_level_(current_level);
+        });
+      }
+
+      // A table write can leave a fan stopped even though the ComfoAir reports a non-zero
+      // commanded % for it (seen live after Supply Only -> Both: exhaust 30% set, 0% running).
+      // The table-sync check cannot see this, so compare commanded vs actual fan output.
+      void check_fan_stall_(uint8_t actual_supply, uint8_t actual_exhaust)
+      {
+        bool exhaust_stalled = commanded_exhaust_percent_ > 0 && actual_exhaust == 0;
+        bool supply_stalled = supply_fan_enabled_ && commanded_supply_percent_ > 0 && actual_supply == 0;
+        if (!commanded_levels_known_ || test_mode_active_ || !(exhaust_stalled || supply_stalled))
+        {
+          fan_stall_since_ms_ = 0;
+          return;
+        }
+
+        uint32_t now = millis();
+        if (fan_stall_since_ms_ == 0)
+        {
+          fan_stall_since_ms_ = now;
+          return;
+        }
+        if (now - fan_stall_since_ms_ < FAN_STALL_GRACE_MS)
+          return;
+        if (last_fan_stall_kick_ms_ != 0 && now - last_fan_stall_kick_ms_ < FAN_STALL_RETRY_MS)
+          return;
+
+        last_fan_stall_kick_ms_ = now;
+        ESP_LOGW(TAG, "Fan stalled (supply %u%%/%u%%, exhaust %u%%/%u%% actual/commanded) - bouncing level",
+                 actual_supply, commanded_supply_percent_, actual_exhaust, commanded_exhaust_percent_);
+        bounce_level_(commanded_level_);
+      }
+
       void set_comfort_temperature_(float temperature)
       {
         if (temperature < 12.0f || temperature > 29.0f)
@@ -1049,6 +1093,7 @@ namespace esphome
           {
             exhaust_fan_speed_rpm->publish_state(static_cast<int>(1875000.0f / get_uint16_(4)));
           }
+          check_fan_stall_(msg[0], msg[1]);
           break;
         }
         case RES_GET_VALVE_STATUS:
@@ -1169,18 +1214,14 @@ namespace esphome
           if (pending_level_reissue_)
           {
             pending_level_reissue_ = false;
-            uint8_t current_level = msg[8];
-            if (current_level >= 1 && current_level <= 4)
-            {
-              uint8_t nudge_level = (current_level < 4) ? (current_level + 1) : (current_level - 1);
-              ESP_LOGD(TAG, "Bouncing level %u->%u->%u to apply updated ventilation table",
-                       current_level, nudge_level, current_level);
-              set_level_(nudge_level);
-              this->set_timeout("level_reapply", 800, [this, current_level]() {
-                this->set_level_(current_level);
-              });
-            }
+            bounce_level_(msg[8]);
           }
+
+          commanded_exhaust_percent_ = msg[6];
+          commanded_supply_percent_ = msg[7];
+          commanded_level_ = msg[8];
+          supply_fan_enabled_ = (msg[9] == 1);
+          commanded_levels_known_ = true;
 
           // Publish to number components
           if (supply_absent_percent != nullptr)
@@ -1955,6 +1996,16 @@ namespace esphome
       // re-issues the current level once — applying the new percentages without a manual
       // gear toggle. One-shot; cleared on re-issue. set_level_() must NOT set it (no loop).
       bool pending_level_reissue_{false};
+
+      static constexpr uint32_t FAN_STALL_GRACE_MS{60000};
+      static constexpr uint32_t FAN_STALL_RETRY_MS{300000};
+      uint8_t commanded_supply_percent_{0};
+      uint8_t commanded_exhaust_percent_{0};
+      uint8_t commanded_level_{0};
+      bool supply_fan_enabled_{false};
+      bool commanded_levels_known_{false};
+      uint32_t fan_stall_since_ms_{0};
+      uint32_t last_fan_stall_kick_ms_{0};
 
       // Time delay cache (8 values according to CMD_GET_TIME_DELAY)
       uint8_t time_delays_[8]{0, 0, 0, 0, 0, 0, 0, 0};
