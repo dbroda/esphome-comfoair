@@ -3,8 +3,7 @@
 // ComfoAir serial framing, free of ESPHome dependencies so it can be unit-tested on the host.
 //
 // Wire format: 07 F0 00 <cmd> <len> <data...> <checksum> 07 0F
-// Every 0x07 between <cmd> and <checksum> (inclusive) is sent doubled; the checksum
-// counts it once. An acknowledgement is the bare pair 07 F3.
+// An acknowledgement is the bare pair 07 F3.
 
 #include <cstddef>
 #include <cstdint>
@@ -49,7 +48,7 @@ namespace esphome
         out[n++] = COMMAND_HEAD;
         out[n++] = 0x00;
         put_escaped(command);
-        put_escaped(length);
+        out[n++] = length;
         for (uint8_t i = 0; i < length; i++)
           put_escaped(data[i]);
         put_escaped(checksum(command, length, data));
@@ -106,8 +105,13 @@ namespace esphome
             return Result::PENDING;
           }
 
-          if (index_ == COMMAND_IDX_DATA && byte > MAX_DATA)
-            return resync_(0, byte);
+          if (index_ == COMMAND_IDX_DATA)
+          {
+            if (byte > MAX_DATA)
+              return resync_(0, byte);
+            buf_[index_++] = byte;
+            return Result::PENDING;
+          }
 
           if (index_ <= checksum_index_())
           {

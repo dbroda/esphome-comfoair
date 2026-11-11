@@ -74,12 +74,24 @@ TEST_CASE("checksum equal to 0x07 right before the tail")
   CHECK(payload(decoder) == Bytes{0xC0});
 }
 
-TEST_CASE("data length equal to 0x07")
+TEST_CASE("bypass control response with length 0x07 sent once decodes")
+{
+  Decoder decoder;
+  Bytes wire{0x07, 0xF0, 0x00, 0xE0, 0x07, 0x01, 0x02, 0x50, 0x03, 0x04, 0x00, 0x01, 0xEF, 0x07, 0x0F};
+
+  CHECK(feed_all(decoder, wire) == std::vector<Result>{Result::FRAME});
+  CHECK(decoder.command() == 0xE0);
+  CHECK(payload(decoder) == Bytes{0x01, 0x02, 0x50, 0x03, 0x04, 0x00, 0x01});
+}
+
+TEST_CASE("length 0x07 is encoded once")
 {
   Bytes data{1, 2, 3, 4, 5, 6, 8};
+  Bytes wire = encode_bytes(0x0C, data);
+  CHECK(Bytes(wire.begin() + 4, wire.begin() + 6) == Bytes{0x07, 0x01});
+
   Decoder decoder;
-  CHECK(feed_all(decoder, encode_bytes(0x0C, data)) == std::vector<Result>{Result::FRAME});
-  CHECK(decoder.length() == 7);
+  CHECK(feed_all(decoder, wire) == std::vector<Result>{Result::FRAME});
   CHECK(payload(decoder) == data);
 }
 
