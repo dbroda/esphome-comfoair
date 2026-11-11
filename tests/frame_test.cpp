@@ -168,11 +168,19 @@ TEST_CASE("round trip for every single-byte payload")
   }
 }
 
-TEST_CASE("command byte equal to 0x07")
+TEST_CASE("command 0x07 (set analog outputs) is encoded once")
+{
+  CHECK(encode_bytes(0x07, {0x32, 0x28, 0x00}) ==
+        Bytes{0x07, 0xF0, 0x00, 0x07, 0x03, 0x32, 0x28, 0x00, 0x11, 0x07, 0x0F});
+}
+
+TEST_CASE("command byte equal to 0x07 sent once decodes")
 {
   Decoder decoder;
-  CHECK(feed_all(decoder, encode_bytes(0x07, {1, 2})) == std::vector<Result>{Result::FRAME});
+  CHECK(feed_all(decoder, {0x07, 0xF0, 0x00, 0x07, 0x02, 0x01, 0x02, 0xB9, 0x07, 0x0F}) ==
+        std::vector<Result>{Result::FRAME});
   CHECK(decoder.command() == 0x07);
+  CHECK(payload(decoder) == Bytes{1, 2});
 }
 
 TEST_CASE("largest frame made only of 0x07")

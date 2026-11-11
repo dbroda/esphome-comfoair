@@ -47,7 +47,7 @@ namespace esphome
         out[n++] = COMMAND_PREFIX;
         out[n++] = COMMAND_HEAD;
         out[n++] = 0x00;
-        put_escaped(command);
+        out[n++] = command;
         out[n++] = length;
         for (uint8_t i = 0; i < length; i++)
           put_escaped(data[i]);
@@ -101,6 +101,12 @@ namespace esphome
           case 2:
             if (byte != 0x00)
               return resync_(0, byte);
+            buf_[index_++] = byte;
+            return Result::PENDING;
+          }
+
+          if (index_ == COMMAND_IDX_MSG_ID)
+          {
             buf_[index_++] = byte;
             return Result::PENDING;
           }

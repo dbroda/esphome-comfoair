@@ -943,11 +943,20 @@ namespace esphome
           memcpy(connector_board_version_, msg, std::min<size_t>(decoder_.length(), sizeof(connector_board_version_)));
           break;
         case RES_SET_TEST_MODE:
-          ESP_LOGI(TAG, "Test mode activated");
+          ESP_LOGI(TAG, "Test mode activated (fans start at supply=%u%%, exhaust=%u%%)",
+                   test_supply_fan_speed_, test_exhaust_fan_speed_);
           test_mode_active_ = true;
           if (test_mode_switch_ != nullptr)
           {
             test_mode_switch_->publish_state(true);
+          }
+          if (test_supply_fan_number_ != nullptr)
+          {
+            test_supply_fan_number_->publish_state(test_supply_fan_speed_);
+          }
+          if (test_exhaust_fan_number_ != nullptr)
+          {
+            test_exhaust_fan_number_->publish_state(test_exhaust_fan_speed_);
           }
           break;
         case RES_EXIT_TEST_MODE:
@@ -960,6 +969,11 @@ namespace esphome
           break;
         case RES_GET_FAN_STATUS:
         {
+          if (!test_mode_active_)
+          {
+            test_supply_fan_speed_ = msg[0];
+            test_exhaust_fan_speed_ = msg[1];
+          }
           if (intake_fan_speed != nullptr)
           {
             intake_fan_speed->publish_state(msg[0]);
