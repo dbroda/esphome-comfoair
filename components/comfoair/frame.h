@@ -119,10 +119,16 @@ namespace esphome
             return Result::PENDING;
           }
 
-          if (index_ <= checksum_index_())
+          if (index_ < checksum_index_())
           {
             buf_[index_++] = byte;
             escape_pending_ = (byte == COMMAND_PREFIX);
+            return Result::PENDING;
+          }
+
+          if (index_ == checksum_index_())
+          {
+            buf_[index_++] = byte;
             return Result::PENDING;
           }
 
@@ -130,6 +136,12 @@ namespace esphome
           {
             if (byte != COMMAND_PREFIX)
               return resync_(0, byte);
+            index_++;
+            return Result::PENDING;
+          }
+
+          if (index_ == checksum_index_() + 2 && byte == COMMAND_PREFIX && received_checksum() == COMMAND_PREFIX)
+          {
             index_++;
             return Result::PENDING;
           }
